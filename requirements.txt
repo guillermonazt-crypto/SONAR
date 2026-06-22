@@ -1,0 +1,16 @@
+﻿# SONAR - Sistema de Observabilidad de Nodos y Analisis de Red
+# Dependencias Python 3.10+
+
+# Recoleccion SNMP
+pysnmp==7.1.27
+
+# Base de datos de series de tiempo
+influxdb-client==1.44.0
+
+# Configuracion
+python-dotenv==1.0.1
+PyYAML==6.0.1
+
+# Utilidades
+rich==13.7.1
+tenacity==8.2.3
