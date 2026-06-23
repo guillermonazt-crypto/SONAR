@@ -1,0 +1,49 @@
+﻿version: "3.8"
+
+networks:
+  sonar_net:
+    driver: bridge
+
+volumes:
+  influxdb_data:
+  influxdb_config:
+  grafana_data:
+
+services:
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: sonar_influxdb
+    restart: unless-stopped
+    networks:
+      - sonar_net
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: sonar_admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: sonar_password_2024
+      DOCKER_INFLUXDB_INIT_ORG: universidad
+      DOCKER_INFLUXDB_INIT_BUCKET: red_universitaria
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: sonar-super-secret-token-changeme
+      DOCKER_INFLUXDB_INIT_RETENTION: 2160h
+
+  grafana:
+    image: grafana/grafana-oss:10.4.2
+    container_name: sonar_grafana
+    restart: unless-stopped
+    networks:
+      - sonar_net
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: sonar_grafana_2024
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    depends_on:
+      - influxdb
