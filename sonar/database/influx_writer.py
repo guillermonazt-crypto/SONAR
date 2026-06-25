@@ -61,7 +61,7 @@ class InfluxWriter:
         )
 
         self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
-        log.info(f"[{datos['nombre']}] CPU escrito → "
+        log.info(f"[{datos['nombre']}] CPU escrito -> "
                  f"5s={datos['cpu_5s']}% "
                  f"1m={datos['cpu_1m']}% "
                  f"5m={datos['cpu_5m']}%")
