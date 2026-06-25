@@ -6,7 +6,9 @@
 # Este modulo escribe las metricas recolectadas en InfluxDB.
 # Es el puente entre los datos del switch y la base de datos.
 
+# pyrefly: ignore [missing-import]
 from influxdb_client import InfluxDBClient, Point, WritePrecision
+# pyrefly: ignore [missing-import]
 from influxdb_client.client.write_api import SYNCHRONOUS
 from datetime import datetime, timezone
 

@@ -14,3 +14,6 @@ PyYAML==6.0.1
 # Utilidades
 rich==13.7.1
 tenacity==8.2.3
+
+# Interfaz web
+flask==3.0.3

@@ -1,15 +1,17 @@
-﻿devices:
-  - hostname: 192.168.1.1
-    name: SW-CORE-01
-    role: core
-    site: campus_central
-
-  - hostname: 192.168.1.2
-    name: SW-DIST-01
-    role: distribution
-    site: campus_central
-
-  - hostname: 192.168.1.3
-    name: SW-ACC-01
-    role: access
-    site: campus_central
+devices:
+- hostname: 192.168.1.1
+  name: SW-CORE-01
+  role: core
+  site: campus_central
+- hostname: 192.168.1.2
+  name: SW-DIST-01
+  role: distribution
+  site: campus_central
+- hostname: 192.168.1.3
+  name: SW-ACC-01
+  role: access
+  site: campus_central
+- hostname: 192.168.1.4
+  name: IDA
+  role: access
+  site: Institudo de las artes

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SONAR - Gestión de Inventario</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 30px;
+        }
+
+        header {
+            border-bottom: 2px solid #00d4ff;
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            color: #00d4ff;
+            letter-spacing: 3px;
+        }
+
+        header p {
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .card {
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 8px;
+            padding: 25px;
+        }
+
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 20px;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Tabla de dispositivos */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 10px;
+            color: #888;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            border-bottom: 1px solid #2a2d3a;
+        }
+
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #1f2230;
+            font-size: 0.9rem;
+        }
+
+        tr:hover td {
+            background: #1f2230;
+        }
+
+        .badge {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .badge.core {
+            background: #ff4757;
+            color: white;
+        }
+
+        .badge.distribution {
+            background: #ffa502;
+            color: black;
+        }
+
+        .badge.access {
+            background: #2ed573;
+            color: black;
+        }
+
+        .btn-eliminar {
+            background: transparent;
+            border: 1px solid #ff4757;
+            color: #ff4757;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            text-decoration: none;
+        }
+
+        .btn-eliminar:hover {
+            background: #ff4757;
+            color: white;
+        }
+
+        /* Formulario */
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            color: #888;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            letter-spacing: 1px;
+        }
+
+        input,
+        select {
+            width: 100%;
+            background: #0f1117;
+            border: 1px solid #2a2d3a;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        .btn-agregar {
+            width: 100%;
+            background: #00d4ff;
+            color: #0f1117;
+            border: none;
+            padding: 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 10px;
+        }
+
+        .btn-agregar:hover {
+            background: #00b8d9;
+        }
+
+        .empty {
+            text-align: center;
+            color: #444;
+            padding: 30px;
+        }
+
+        .count {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>⬡ S.O.N.A.R.</h1>
+        <p>Sistema de Observabilidad de Nodos y Análisis de Red — UAEH</p>
+    </header>
+
+    <div class="grid">
+
+        <!-- Panel izquierdo: lista de switches -->
+        <div class="card">
+            <h2>Dispositivos Monitoreados</h2>
+            <p class="count">{{ devices|length }} dispositivo(s) en inventario</p>
+
+            {% if devices %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>IP</th>
+                        <th>Rol</th>
+                        <th>Sitio</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for device in devices %}
+                    <tr>
+                        <td>{{ device.name }}</td>
+                        <td>{{ device.hostname }}</td>
+                        <td>
+                            <span class="badge {{ device.role }}">
+                                {{ device.role }}
+                            </span>
+                        </td>
+                        <td>{{ device.site }}</td>
+                        <td>
+                            <a href="/eliminar/{{ device.name }}" class="btn-eliminar"
+                                onclick="return confirm('¿Eliminar {{ device.name }}?')">
+                                Eliminar
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">
+                No hay dispositivos en el inventario.<br>
+                Agrega uno usando el formulario.
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Panel derecho: formulario -->
+        <div class="card">
+            <h2>Agregar Dispositivo</h2>
+            <form action="/agregar" method="POST">
+
+                <div class="form-group">
+                    <label>Nombre del Switch</label>
+                    <input type="text" name="name" placeholder="SW-CORE-01" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Dirección IP</label>
+                    <input type="text" name="hostname" placeholder="192.168.1.1" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Rol</label>
+                    <select name="role">
+                        <option value="core">Core</option>
+                        <option value="distribution">Distribution</option>
+                        <option value="access" selected>Access</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Sitio</label>
+                    <input type="text" name="site" placeholder="campus_central">
+                </div>
+
+                <button type="submit" class="btn-agregar">
+                    + Agregar Switch
+                </button>
+
+            </form>
+        </div>
+
+    </div>
+
+</body>
+
+</html>
