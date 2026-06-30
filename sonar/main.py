@@ -36,7 +36,7 @@ def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
     Returns:
         True si el proceso fue exitoso, False de lo contrario.
     """
-    nombre = dispositivo.get("name", dispositivo["hostname"])
+    nombre = dispositivo.get("name") or dispositivo.get("hostname", "unknown")
     try:
         log.info(f"Consultando switch: {nombre}")
         datos = obtener_datos_switch(nombre)
@@ -103,7 +103,7 @@ def main() -> None:
 
     log.info(f"Dispositivos cargados: {len(inventario)}")
     for d in inventario:
-        log.info(f"  -> {d.get('name', d['hostname'])} ({d.get('role', 'unknown')})")
+        log.info(f"  -> {d.get('name') or d.get('hostname', 'unknown')} ({d.get('role', 'unknown')})")
 
     writer = InfluxWriter()
     log.info("SONAR activo. Presiona Ctrl + C para detener. \n")
@@ -118,6 +118,7 @@ def main() -> None:
     finally:
         writer.cerrar()
         log.info("Hasta luego.")
+
 
 if __name__ == "__main__":
     main()

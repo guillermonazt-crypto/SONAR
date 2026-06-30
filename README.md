@@ -25,13 +25,13 @@ Mientras Orion ofrece visibilidad macro, SONAR cubre los puntos ciegos:
 
 ## Stack Tecnológico
 
-| Componente    | Tecnología      |           Rol             |
-|---------------|-----------------|---------------------------|
-| Recolección   | Python + SNMP   | Consulta switches via OIDs|
-| Base de datos | InfluxDB 2.7    | Almacena series de tiempo |
-| Visualización | Grafana 10.4    | Dashboards y alertas      |
-| Interfaz web  | Flask           | Gestión de inventario     |
-| Despliegue    | Docker Compose  | Orquestación de servicios |
+|   Componente  |      Tecnología      |           Rol             |
+|---------------|----------------------|---------------------------|
+| Recolección   | Python + SNMP        | Consulta switches via OIDs|
+| Base de datos | InfluxDB 2.7         | Almacena series de tiempo |
+| Visualización | Grafana 10.4         | Dashboards y alertas      |
+| Interfaz web  | Flask                | Gestión de inventario     |
+| Despliegue    | Docker Compose       | Orquestación de servicios |
 
 ---
 

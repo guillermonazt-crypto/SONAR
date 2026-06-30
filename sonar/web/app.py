@@ -85,7 +85,7 @@ def agregar():
 
     # Verificar duplicados
     for d in devices:
-        if d["hostname"].lower() == nuevo["hostname"].lower():
+        if d.get("hostname", "").lower() == nuevo["hostname"].lower():
             log.warning(f"Intento de agregar duplicado: {nuevo['hostname']}")
             return redirect(url_for("index"))
 
@@ -109,6 +109,15 @@ def eliminar(nombre: str):
 
     log.info(f"Dispositivo eliminado: {nombre}")
     return redirect(url_for("index"))
+
+@app.route("/dashboards")
+def dashboards():
+    """
+    Muestra los dashboards de Grafana embebidos dentro de SONAR.
+    """
+    log.info("Vista de dashboards cargada")
+    return render_template("dashboards.html")
+
 
 if __name__ == "__main__":
     log.info("Iniciando interfaz web de SONAR en http://localhost:5000")
