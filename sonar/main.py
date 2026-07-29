@@ -4,121 +4,110 @@
 # Proyecto: SONAR - Sistema de Observabilidad de Nodos y Analisis de Red
 #
 # Punto de entrada principal de SONAR.
-# Ejecuta el loop de monitoreo continuo consultando todos los switches
-# del inventario y escribiendo las metricas en InfluxDB.
+# Loop de monitoreo continuo con switches reales via SNMP.
 
-import sys
-from pathlib import Path
-
-# Add project root to sys.path to support running directly (e.g. python sonar/main.py)
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
+import asyncio
 import time
-from datetime import datetime
+import sys
 
-# pyrefly: ignore [missing-import]
 from sonar.utils.logger import get_logger
-from sonar.database.influx_writer import InfluxWriter, log
 from sonar.utils.config import load_inventory, POLL_INTERVAL
-from snmp_simulator import obtener_datos_switch
+from sonar.database.influx_writer import InfluxWriter
+from sonar.collector.snmp_collector import obtener_datos_reales
 
-logger = get_logger(__name__)
+log = get_logger(__name__)
 
-def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
+
+async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
     """
-    Obtiene los datos de un switch específico y los escribe en InfluxDB.
+    Consulta un switch real via SNMP y escribe sus datos en InfluxDB.
 
     Args:
-        dispositivo: Diccionario con la configuración del dispositivo del inventario.
-        writer: Instancia activa de InfluxWriter.
+        dispositivo: Diccionario del inventario
+        writer: Instancia activa de InfluxWriter
+
     Returns:
-        True si el proceso fue exitoso, False de lo contrario.
+        True si todo salio bien, False si hubo error
     """
-    nombre = dispositivo.get("name") or dispositivo.get("hostname", "unknown")
+    nombre = dispositivo.get('name', dispositivo['hostname'])
+
     try:
-        log.info(f"Consultando switch: {nombre}")
-        datos = obtener_datos_switch(nombre)
-        
-        # Override simulated metadata with actual device inventory metadata
-        datos = datos.copy()
-        datos["nombre"] = nombre
-        datos["ip"] = dispositivo["hostname"]
-        datos["rol"] = dispositivo.get("role", "unknown")
-        datos["sitio"] = dispositivo.get("site", "unknown")
-        
+        datos = await obtener_datos_reales(dispositivo)
+
+        if not datos:
+            log.warning(f"[{nombre}] Sin datos, saltando...")
+            return False
+
         writer.escribir_cpu(datos)
         writer.escribir_interfaces(datos)
         writer.escribir_optica(datos)
+
+        log.info(f"[{nombre}] ok CPU={datos['cpu_5m']}% "
+                 f"Interfaces={len(datos['interfaces'])}")
         return True
+
     except Exception as e:
-        log.error(f"Error al procesar el switch {nombre}: {e}")
+        log.error(f"[{nombre}] x Error: {e}")
         return False
 
-def ejecutar_ciclo(inventario: list, writer: InfluxWriter) -> None:
-    """
-    Ejecuta un ciclo completo de monitoreo para todos los switches.
-    Un ciclo = consultar y escribir datos de todos los dispositivos.
 
-    Args:
-        inventario: Lista de dispositivos del archivo devices.yaml
-        writer: Instancia activa de InfluxWriter
+async def ejecutar_ciclo(inventario: list, writer: InfluxWriter) -> None:
+    """
+    Ejecuta un ciclo completo consultando todos los switches en paralelo.
     """
     inicio = time.time()
-    exitosos = 0
-    fallidos = 0
+    log.info(f"━━━ Iniciando ciclo: {len(inventario)} dispositivos ━━━")
 
-    log.info(f"Iniciando ciclo: {len(inventario)} dispositivos")
+    # Consulta todos los switches simultaneamente
+    tareas = [procesar_switch(d, writer) for d in inventario]
+    resultados = await asyncio.gather(*tareas, return_exceptions=True)
 
-    for dispositivo in inventario:
-        exito = procesar_switch(dispositivo, writer)
+    exitosos = sum(1 for r in resultados if r is True)
+    fallidos  = len(resultados) - exitosos
+    duracion  = round(time.time() - inicio, 2)
 
-        if exito:
-            exitosos += 1
-        else:
-            fallidos += 1
+    log.info(f"━━━ Ciclo completo en {duracion}s | "
+             f" ok {exitosos} exitosos | "
+             f" x {fallidos} fallidos ━━━")
 
-    duracion = round(time.time() - inicio, 2)
-    log.info(
-        f"-- Ciclo completo en {duracion}s\n"
-        f"--- Exitosos: {exitosos} | Fallidos: {fallidos}\n"
-        f"--- Esperando {POLL_INTERVAL}s para el próximo ciclo"
-    )
 
-def main() -> None:
+async def main() -> None:
     """
-    Función principal de SONAR - loop infinito de monitoreo
+    Loop principal de SONAR con switches reales.
     """
-    log.info("\n" + "=" * 55)
-    log.info("SONAR - Sistema de Observabilidad de Nodos y Analisis de Red")
-    log.info("Iniciando SONAR en modo monitoreo continuo")
-    log.info("=" * 55 + "\n")
+    log.info("=" * 55)
+    log.info("  S.O.N.A.R. - Modo produccion")
+    log.info(f"  Intervalo: {POLL_INTERVAL} segundos")
+    log.info("=" * 55)
 
     inventario = load_inventory()
 
     if not inventario:
-        log.error("No hay dispositivos para monitorear - revisar devices.yaml")
+        log.error("Inventario vacio. Verifica inventory/devices.yaml")
         sys.exit(1)
 
     log.info(f"Dispositivos cargados: {len(inventario)}")
     for d in inventario:
-        log.info(f"  -> {d.get('name') or d.get('hostname', 'unknown')} ({d.get('role', 'unknown')})")
+        log.info(f"  → {d.get('name', d['hostname'])} "
+                 f"({d.get('role', 'unknown')}) "
+                 f"{d['hostname']}")
 
     writer = InfluxWriter()
-    log.info("SONAR activo. Presiona Ctrl + C para detener. \n")
+    log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
         while True:
-            ejecutar_ciclo(inventario, writer)
-            log.info(f"Esperando {POLL_INTERVAL} segundos para el siguiente ciclo...\n")
-            time.sleep(POLL_INTERVAL)
+            await ejecutar_ciclo(inventario, writer)
+            log.info(f"Esperando {POLL_INTERVAL}s...\n")
+            await asyncio.sleep(POLL_INTERVAL)
+
     except KeyboardInterrupt:
-        log.info("\nSONAR detenido por el usuario")
+        log.info("SONAR detenido por el usuario.")
+
     finally:
         writer.cerrar()
         log.info("Hasta luego.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
