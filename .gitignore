@@ -1,5 +1,26 @@
-﻿.venv/
+﻿# Entorno Python
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+
+# Variables de entorno - NUNCA subir
 .env
+
+# DATOS SENSIBLES DE LA UAEH - NUNCA subir
+inventory/devices.yaml
+scratch_test_collector.py
+test_real.py
+test_escritura.py
+data/
+
+# Docker
+docker-compose.yml
+
+# Logs
 *.log
+logs/
+
+# IDE
+.vscode/
+.idea/
