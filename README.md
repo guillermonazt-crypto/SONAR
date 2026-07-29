@@ -124,8 +124,8 @@ python sonar/main.py
 | Servicio |            URL         |           Credenciales            |
 |----------|------------------------|-----------------------------------|
 | SONAR Web| http://localhost:5000  | —                                 |
-| Grafana  | http://localhost:3000  | admin / sonar_grafana_2024        |
-| InfluxDB | http://localhost:8086  | sonar_admin / sonar_password_2024 |
+| Grafana  | http://localhost:3000  |                                   |
+| InfluxDB | http://localhost:8086  |                                   |
 
 ---
 
