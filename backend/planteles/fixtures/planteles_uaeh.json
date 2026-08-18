@@ -1,0 +1,273 @@
+[
+    {
+        "model": "planteles.division",
+        "pk": 1,
+        "fields": {
+            "nombre": "Institutos"
+        }
+    },
+    {
+        "model": "planteles.division",
+        "pk": 2,
+        "fields": {
+            "nombre": "Escuelas Superiores"
+        }
+    },
+    {
+        "model": "planteles.division",
+        "pk": 3,
+        "fields": {
+            "nombre": "Preparatorias"
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 1,
+        "fields": {
+            "nombre": "Instituto de Artes",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 2,
+        "fields": {
+            "nombre": "Instituto de Ciencias Agropecuarias",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 3,
+        "fields": {
+            "nombre": "Instituto de Ciencias Básicas e Ingeniería",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 4,
+        "fields": {
+            "nombre": "Instituto de Ciencias de la Salud",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 5,
+        "fields": {
+            "nombre": "Instituto de Ciencias Económico Administrativas",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 6,
+        "fields": {
+            "nombre": "Instituto de Ciencias Sociales y Humanidades",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 7,
+        "fields": {
+            "nombre": "Instituto de Artes",
+            "division": 1,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 8,
+        "fields": {
+            "nombre": "Escuela Superior Actopan",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 9,
+        "fields": {
+            "nombre": "Escuela Superior Apan",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 10,
+        "fields": {
+            "nombre": "Escuela Superior Atotonilco de Tula",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 11,
+        "fields": {
+            "nombre": "Escuela Superior Ciudad Sahagún",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 12,
+        "fields": {
+            "nombre": "Escuela Superior Huejutla",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 13,
+        "fields": {
+            "nombre": "Escuela Superior Tepeji del Río",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 14,
+        "fields": {
+            "nombre": "Escuela Superior Tizayuca",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 15,
+        "fields": {
+            "nombre": "Escuela Superior Tlahuelilpan",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 16,
+        "fields": {
+            "nombre": "Escuela Superior Zimapán",
+            "division": 2,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 17,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 1",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 18,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 2",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 19,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 3",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 20,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 4",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 21,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 5",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 22,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 6",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 23,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 7",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 24,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 8",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    },
+    {
+        "model": "planteles.plantel",
+        "pk": 25,
+        "fields": {
+            "nombre": "Escuela Preparatoria Número 9",
+            "division": 3,
+            "ubicacion": "",
+            "activo": true
+        }
+    }
+]
