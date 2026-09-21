@@ -30,6 +30,11 @@ class Switch(models.Model):
     )
     activo   = models.BooleanField(default=True)
     creado   = models.DateTimeField(auto_now_add=True)
+    ultima_consulta = models.DateTimeField(null=True, blank=True)
+    lectura_correcta = models.BooleanField(null=True, default=None)
+    cpu_5s = models.IntegerField(null=True, blank=True)
+    cpu_1m = models.IntegerField(null=True, blank=True)
+    cpu_5m = models.IntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Switch"
@@ -65,8 +70,10 @@ class Puerto(models.Model):
     vlan           = models.IntegerField(null=True, blank=True)
     voice_vlan     = models.IntegerField(null=True, blank=True)
     es_trunk       = models.BooleanField(default=False)
-    errores_entrada = models.BigIntegerField(default=0)
-    errores_salida  = models.BigIntegerField(default=0)
+    estado_operativo = models.CharField(max_length=20, default="unknown")
+    errores_crc = models.BigIntegerField(null=True, blank=True)
+    errores_entrada = models.BigIntegerField(null=True, blank=True)
+    errores_salida  = models.BigIntegerField(null=True, blank=True)
     actualizado    = models.DateTimeField(auto_now=True)
 
     class Meta:

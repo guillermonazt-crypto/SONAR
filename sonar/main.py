@@ -12,6 +12,7 @@ import time
 from sonar.utils.logger import get_logger
 from sonar.utils.config import load_inventory, POLL_INTERVAL
 from sonar.database.influx_writer import InfluxWriter
+from sonar.database.django_store import record_poll
 from sonar.collector.snmp_collector import obtener_datos_reales
 
 log = get_logger(__name__)
@@ -32,6 +33,8 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
 
     try:
         datos = await obtener_datos_reales(dispositivo)
+
+        await asyncio.to_thread(record_poll, dispositivo, datos)
 
         if not datos:
             log.warning(f"[{nombre}] Sin datos, saltando...")

@@ -1,114 +1,93 @@
 # SONAR
 
-Sistema de Observabilidad de Nodos y Análisis de Red.
-Recolecta métricas SNMP y las almacena en InfluxDB para visualizarlas con Grafana.
+Observabilidad de red con **React + Django + SNMP + InfluxDB**.
+La interfaz conserva el diseño oscuro y cian de SONAR; Flask está retirado.
 
 ## Dónde está cada cosa
 
 ```text
-SONAR/
-├── sonar/                  Monitoreo y aplicación Flask
-│   ├── main.py             Worker: recarga, consulta y escritura
-│   ├── collector/          Consultas SNMP
-│   ├── database/           Escritura en InfluxDB
-│   ├── utils/              Configuración y registro de eventos
-│   └── web/                Interfaz Flask y plantillas
-├── backend/                Backend Django
-│   ├── manage.py           Comandos Django
-│   ├── config/             Settings, rutas, ASGI y WSGI
-│   ├── planteles/          Divisiones y planteles
-│   ├── switches/           Switches y puertos
-│   ├── usuarios/           Usuarios y roles
-│   └── db.sqlite3          Base local, excluida de Git
-├── tests/                  Pruebas automáticas del worker
-├── scripts/                Utilidades de ejecución manual
-│   ├── snmp_simulator.py   Datos simulados, sin red
-│   ├── check_snmp.py       Consulta SNMP manual, usa red
-│   └── local/              Experimentos privados, excluidos de Git
-├── inventory/              Inventario YAML privado
-├── data/                   Datos locales, excluidos de Git
-├── grafana/                Configuración de Grafana
-├── docs/                   Documentación adicional
-├── requirements.txt        Dependencias Python
-├── .env.example            Ejemplo de configuración
-└── .env                    Credenciales locales, excluidas de Git
+frontend/             Interfaz React con Vite
+  src/components/     Login, inventario, planteles y puertos
+  src/api/            Cliente HTTP, sesión y CSRF
+backend/              Django
+  api/                Rutas, serializers, permisos y pruebas HTTP
+  config/             Configuración, ASGI y WSGI
+  switches/           Modelos y servicio de persistencia del worker
+  planteles/          Divisiones y planteles
+  usuarios/           Usuarios y roles
+  manage.py           Comandos Django
+sonar/                Worker SNMP
+  collector/          Consultas SNMP
+  database/           Adaptadores InfluxDB y Django
+  utils/              Configuración y logs
+  main.py             Ciclo de monitoreo
+scripts/              Simulador y utilidades manuales
+tests/               Pruebas offline del worker
+docs/                Arquitectura y contrato de API
+inventory/            Inventario YAML opcional y privado
+data/                Datos locales
+grafana/             Configuración Grafana
 ```
 
-Las pruebas de los modelos Django permanecen dentro de cada aplicación Django.
-Las carpetas `migrations/` contienen el historial del esquema de la base;
-`__pycache__/` y `.venv/` son generadas por Python.
+## Iniciar en desarrollo
 
-## Instalación y ejecución
-
-Requiere Python 3.12+, Git y Docker para InfluxDB/Grafana.
-Ejecuta los comandos desde la raíz del proyecto con el entorno virtual activado:
+Requiere Python 3.12+ y Node 20.19+ o 22.12+ (se validó con Node 24).
+Activa `.venv` y ejecuta desde la raíz:
 
 ```powershell
 python -m pip install -r requirements.txt
-# Solo si aún no tienes .env:
-Copy-Item .env.example .env
+# Solo para una instalación nueva: copia .env.example a .env.
+# Define SECRET_KEY sin sobrescribir las demás credenciales.
+python backend/manage.py migrate
+# Solo si necesitas crear una cuenta administradora:
+python backend/manage.py createsuperuser
+python backend/manage.py runserver 127.0.0.1:8000
 ```
 
-Configura SECRET_KEY en `.env` o en el entorno; no hay clave predeterminada.
-Genera una clave con `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
-Conserva las credenciales existentes al editar `.env`.
+En otra terminal:
 
-| Acción | Comando desde la raíz |
-|---|---|
-| InfluxDB y Grafana (compose local) | `docker compose up -d` |
-| Worker SNMP (consulta dispositivos) | `python -m sonar.main` |
-| Interfaz Flask | `python -m sonar.web.app` |
-| Administración Django | `python backend/manage.py runserver` |
-| Aplicar migraciones Django | `python backend/manage.py migrate` |
-| Reporte simulado sin red | `python -m scripts.snmp_simulator` |
+```powershell
+cd frontend
+pnpm install --frozen-lockfile
+pnpm dev
+```
 
-Flask usa el puerto 5000, Django el 8000, Grafana el 3000 e InfluxDB el 8086.
-Flask administra el inventario YAML; Django administra su propio inventario.
+Abre http://127.0.0.1:5173 e inicia sesión con una cuenta Django existente.
+Se incluye pnpm-lock.yaml para instalaciones reproducibles. Si pnpm no está en PATH,
+usa la ruta de tu instalación de pnpm. El administrador Django permanece en
+http://127.0.0.1:8000/admin/ para usuarios y permisos.
 
-## Inventario, datos y permisos
+INVENTORY_SOURCE=django conecta el worker al mismo inventario que React.
+Para iniciar sondeos reales, cuando estés listo: `python -m sonar.main`.
+No es necesario iniciar el worker para usar o probar la interfaz.
+Configura frontend/.env.local con VITE_GRAFANA_URL para habilitar el enlace a Grafana.
+Las variables VITE_* son públicas: nunca pongas secretos en ellas.
 
-INVENTORY_SOURCE=yaml lee `inventory/devices.yaml`.
-INVENTORY_SOURCE=django lee por ORM los switches activos de planteles activos
-en la base local Django. Cada ciclo vuelve a leer la fuente; si falla, omite
-ese ciclo y reintenta. No se sincronizan automáticamente YAML y Django.
-
-El worker requiere acceso local a la base y SECRET_KEY para usar Django;
-no utiliza HTTP ni sesión de usuario, y no actualiza Puerto. Su cuenta necesita
-acceso de lectura a la base y su directorio, sin ser superusuario Django.
-El campo rol es descriptivo: el administrador usa is_staff y permisos/grupos
-Django. Las API futuras deberán aplicar permisos explícitos.
-
-Las lecturas SNMP ausentes se representan como None y se omiten como campos
-numéricos en InfluxDB; cero es una lectura válida. Las interfaces conservan
-su estado incluso sin contadores. Escrituras y cierre se ejecutan en hilos
-para permitir que avance el bucle asíncrono.
-
-## Validación sin dispositivos reales
+## Pruebas sin switches reales
 
 ```powershell
 python -m unittest discover -s tests
 $env:PYTHONPATH = (Get-Location).Path
-python backend/manage.py test switches.test_worker --noinput
+python backend/manage.py test api switches --noinput
 python backend/manage.py check
+python backend/manage.py makemigrations --check --dry-run
+cd frontend
+pnpm test
+pnpm build
 ```
 
-Las pruebas usan mocks y una base Django temporal. Configura SECRET_KEY antes
-de ejecutarlas. `scripts/check_snmp.py` y los experimentos de `scripts/local/`
-son manuales y pueden conectarse a dispositivos o servicios reales.
-Para los experimentos usa `python -m scripts.local.NOMBRE_SIN_EXTENSION`.
+Las pruebas usan mocks y bases temporales. Los scripts en scripts/local/ y
+scripts/check_snmp.py son manuales y pueden acceder a equipos o servicios reales.
 
-## Cambios de ubicación
+## Datos locales y estructura
 
-- `backend/backend/` pasó a `backend/config/`: el módulo de configuración ahora
-  es `config.settings`, y los entrypoints son `config.wsgi` y `config.asgi`.
-  Actualiza DJANGO_SETTINGS_MODULE si lo habías definido externamente.
-- `snmp_simulator.py` pasó a `scripts/snmp_simulator.py`.
-- `tests/test_snmp.py` pasó a `scripts/check_snmp.py` porque es una consulta manual.
-- Los tres experimentos de la raíz pasaron a `scripts/local/`.
-- Los esqueletos duplicados de `sonar/` están respaldados en
-  `.local-backup/structure-20260921/`, fuera del seguimiento Git.
+`.env`, `backend/db.sqlite3`, `.local-backup/`, scripts/local/, node_modules/ y
+frontend/dist/ están excluidos de Git. Los cambios de esquema se guardan en migraciones.
+La base anterior a React está respaldada en `.local-backup/before-react-django.sqlite3`.
+El módulo de settings Django es `config.settings`.
 
-## Autor y licencia
+Consulta [arquitectura, permisos y contrato HTTP](docs/architecture.md).
+Sesiones y CSRF siguen la [documentación de DRF](https://www.django-rest-framework.org/api-guide/authentication/).
+El frontend utiliza [Vite](https://vite.dev/guide/).
 
-Guillermo Nazt — Departamento de Telecomunicaciones, UAEH.
-Licencia MIT; consulta LICENSE.
+Guillermo Nazt — Departamento de Telecomunicaciones, UAEH. Licencia MIT.

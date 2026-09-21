@@ -65,7 +65,7 @@ def load_inventory() -> list[dict]:
             "site": "campus_central"
         }
     """
-    source = os.getenv("INVENTORY_SOURCE", "yaml")
+    source = os.getenv("INVENTORY_SOURCE", "django")
     if source == "django":
         return load_django_inventory()
     if source != "yaml":
@@ -96,7 +96,7 @@ def load_django_inventory() -> list[dict]:
     from switches.models import Switch
     close_old_connections()
     try:
-        return [dict(hostname=s.hostname, name=s.nombre, role=s.rol,
+        return [dict(django_id=s.pk, hostname=s.hostname, name=s.nombre, role=s.rol,
                      site=str(s.plantel))
                 for s in Switch.objects.filter(activo=True, plantel__activo=True)
                 .select_related('plantel__division')]

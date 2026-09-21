@@ -31,3 +31,8 @@ backend/db.sqlite3-*
 # Respaldo de estructura y scripts privados
 .local-backup/
 scripts/local/
+
+# React
+node_modules/
+frontend/dist/
+.env.local

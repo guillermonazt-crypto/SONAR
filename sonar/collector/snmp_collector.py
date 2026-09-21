@@ -158,6 +158,7 @@ async def obtener_interfaces(dispositivo: dict) -> list | None:
                   '5': 'dormant', '6': 'notPresent', '7': 'lowerLayerDown'}.get(estado_raw, 'unknown')
 
         interfaces.append({
+            'indice':          int(idx),
             'nombre':          nombre_if,
             'estado':          estado,
             'errores_entrada': _safe_int(in_err.get(idx)),
