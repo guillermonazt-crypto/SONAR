@@ -37,4 +37,5 @@ async def consultar_snmp():
     for varBind in varBinds:
         print(f"Respuesta: {varBind.prettyPrint()}")
 
-asyncio.run(consultar_snmp())
+if __name__ == '__main__':
+    asyncio.run(consultar_snmp())

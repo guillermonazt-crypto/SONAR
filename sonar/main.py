@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-import sys
 
 from sonar.utils.logger import get_logger
 from sonar.utils.config import load_inventory, POLL_INTERVAL
@@ -38,9 +37,9 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
             log.warning(f"[{nombre}] Sin datos, saltando...")
             return False
 
-        writer.escribir_cpu(datos)
-        writer.escribir_interfaces(datos)
-        writer.escribir_optica(datos)
+        await asyncio.to_thread(writer.escribir_cpu, datos)
+        await asyncio.to_thread(writer.escribir_interfaces, datos)
+        await asyncio.to_thread(writer.escribir_optica, datos)
 
         log.info(f"[{nombre}] ok CPU={datos['cpu_5m']}% "
                  f"Interfaces={len(datos['interfaces'])}")
@@ -80,24 +79,17 @@ async def main() -> None:
     log.info(f"  Intervalo: {POLL_INTERVAL} segundos")
     log.info("=" * 55)
 
-    inventario = load_inventory()
-
-    if not inventario:
-        log.error("Inventario vacio. Verifica inventory/devices.yaml")
-        sys.exit(1)
-
-    log.info(f"Dispositivos cargados: {len(inventario)}")
-    for d in inventario:
-        log.info(f"  → {d.get('name', d['hostname'])} "
-                 f"({d.get('role', 'unknown')}) "
-                 f"{d['hostname']}")
-
     writer = InfluxWriter()
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
         while True:
-            await ejecutar_ciclo(inventario, writer)
+            try:
+                inventario = await asyncio.to_thread(load_inventory)
+            except Exception:
+                log.exception("No se pudo recargar el inventario; se omite este ciclo")
+            else:
+                await ejecutar_ciclo(inventario, writer)
             log.info(f"Esperando {POLL_INTERVAL}s...\n")
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -105,7 +97,7 @@ async def main() -> None:
         log.info("SONAR detenido por el usuario.")
 
     finally:
-        writer.cerrar()
+        await asyncio.to_thread(writer.cerrar)
         log.info("Hasta luego.")
 
 

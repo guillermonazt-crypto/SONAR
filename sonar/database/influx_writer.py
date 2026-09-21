@@ -51,6 +51,8 @@ class InfluxWriter:
             datos: Diccionario con datos del switch que incluye
                    nombre, rol, sitio y valores de cpu_5s, cpu_1m, cpu_5m
         """
+        if all(datos.get(f) is None for f in ('cpu_5s', 'cpu_1m', 'cpu_5m')):
+            return
         punto = (
             Point("cpu")
             .tag("device", datos["nombre"])
@@ -84,6 +86,7 @@ class InfluxWriter:
                 .tag("site",      datos["sitio"])
                 .tag("interface", intf["nombre"])
                 .tag("status",    intf["estado"])
+                .field("estado", intf["estado"])
                 .field("errores_entrada", intf["errores_entrada"])
                 .field("errores_crc",     intf["errores_crc"])
                 .field("errores_salida",  intf["errores_salida"])
@@ -133,5 +136,6 @@ class InfluxWriter:
         Cierra la conexion con InfluxDB limpiamente.
         Siempre llamar esto al terminar el programa.
         """
+        self.write_api.close()
         self.client.close()
         log.info("Conexion con InfluxDB cerrada")

@@ -24,3 +24,10 @@ logs/
 # IDE
 .vscode/
 .idea/
+# Base local Django
+backend/db.sqlite3
+backend/db.sqlite3-*
+
+# Respaldo de estructura y scripts privados
+.local-backup/
+scripts/local/

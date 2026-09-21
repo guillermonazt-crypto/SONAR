@@ -5,7 +5,9 @@
 #
 # Modelo de usuario con roles para SONAR.
 
+# pyrefly: ignore [missing-import]
 from django.contrib.auth.models import AbstractUser
+# pyrefly: ignore [missing-import]
 from django.db import models
 
 

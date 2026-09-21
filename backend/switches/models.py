@@ -5,6 +5,7 @@
 #
 # Modelos para switches y puertos de red.
 
+# pyrefly: ignore [missing-import]
 from django.db import models
 from planteles.models import Plantel
 

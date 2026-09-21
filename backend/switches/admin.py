@@ -1,5 +1,7 @@
 # backend/switches/admin.py
+# pyrefly: ignore [missing-import]
 from django.contrib import admin
+# pyrefly: ignore [missing-import]
 from .models import Switch, Puerto
 
 @admin.register(Switch)

@@ -6,7 +6,17 @@
 # Colector SNMP real para switches Cisco IOS-XE.
 # Reemplaza al simulador cuando hay acceso real a los switches.
 
-from pysnmp.hlapi.asyncio import *
+# pyrefly: ignore [missing-import]
+from pysnmp.hlapi.asyncio import (
+    SnmpEngine,
+    CommunityData,
+    UdpTransportTarget,
+    ContextData,
+    ObjectType,
+    ObjectIdentity,
+    get_cmd,
+    walk_cmd,
+)
 import asyncio
 
 from sonar.utils.logger import get_logger
@@ -30,6 +40,14 @@ OID_IF_TABLE = {
     'ifOutErrors':  '1.3.6.1.2.1.2.2.1.20',
     'ifInCRCErrs':  '1.3.6.1.2.1.16.1.1.1.8',
 }
+
+
+def _safe_int(value: str, default: int | None = None) -> int | None:
+    """Convierte de forma segura un string a int."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
 
 async def _get_oid(ip: str, community: str, oid: str) -> str | None:
@@ -86,18 +104,22 @@ async def _walk_oid(ip: str, community: str, oid: str) -> dict:
 
 async def obtener_cpu(dispositivo: dict) -> dict | None:
     """
-    Consulta el CPU del switch via SNMP.
+    Consulta el CPU del switch via SNMP en paralelo.
     """
     ip        = dispositivo['hostname']
     community = config.SNMP_COMMUNITY
     nombre    = dispositivo.get('name', ip)
 
-    cpu = {}
-    for campo, oid in OIDS_CPU.items():
+    async def get_cpu_field(campo, oid):
         valor = await _get_oid(ip, community, oid)
-        if valor is None:
-            return None
-        cpu[campo] = int(valor) if valor.isdigit() else 0
+        return campo, valor
+
+    tareas = [get_cpu_field(campo, oid) for campo, oid in OIDS_CPU.items()]
+    resultados = await asyncio.gather(*tareas)
+
+    cpu = {}
+    for campo, valor in resultados:
+        cpu[campo] = _safe_int(valor)
 
     log.debug(f"[{nombre}] CPU → "
               f"5s={cpu['cpu_5s']}% "
@@ -108,19 +130,22 @@ async def obtener_cpu(dispositivo: dict) -> dict | None:
 
 async def obtener_interfaces(dispositivo: dict) -> list | None:
     """
-    Consulta el estado y errores de todas las interfaces via SNMP walk.
+    Consulta el estado y errores de todas las interfaces via SNMP walk en paralelo.
     """
     ip        = dispositivo['hostname']
     community = config.SNMP_COMMUNITY
     nombre    = dispositivo.get('name', ip)
 
-    nombres  = await _walk_oid(ip, community, OID_IF_TABLE['ifDescr'])
+    nombres = await _walk_oid(ip, community, OID_IF_TABLE['ifDescr'])
     if not nombres:
         return None
 
-    estados  = await _walk_oid(ip, community, OID_IF_TABLE['ifOperStatus'])
-    in_err   = await _walk_oid(ip, community, OID_IF_TABLE['ifInErrors'])
-    out_err  = await _walk_oid(ip, community, OID_IF_TABLE['ifOutErrors'])
+    estados, in_err, out_err, crc_err = await asyncio.gather(
+        _walk_oid(ip, community, OID_IF_TABLE['ifOperStatus']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifInErrors']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifOutErrors']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifInCRCErrs'])
+    )
 
     interfaces = []
     for idx, nombre_if in nombres.items():
@@ -128,15 +153,16 @@ async def obtener_interfaces(dispositivo: dict) -> list | None:
         if any(x in nombre_if for x in ['Vlan', 'Loopback', 'Tunnel', 'Null']):
             continue
 
-        estado_raw = estados.get(idx, '2')
-        estado     = 'up' if estado_raw == '1' else 'down'
+        estado_raw = estados.get(idx)
+        estado = {'1': 'up', '2': 'down', '3': 'testing', '4': 'unknown',
+                  '5': 'dormant', '6': 'notPresent', '7': 'lowerLayerDown'}.get(estado_raw, 'unknown')
 
         interfaces.append({
             'nombre':          nombre_if,
             'estado':          estado,
-            'errores_entrada': int(in_err.get(idx, 0)),
-            'errores_crc':     0,
-            'errores_salida':  int(out_err.get(idx, 0)),
+            'errores_entrada': _safe_int(in_err.get(idx)),
+            'errores_crc':     _safe_int(crc_err.get(idx)),
+            'errores_salida':  _safe_int(out_err.get(idx)),
         })
 
     log.debug(f"[{nombre}] {len(interfaces)} interfaces consultadas")

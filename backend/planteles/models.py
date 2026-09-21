@@ -6,6 +6,7 @@
 # Modelos para la jerarquia de planteles de la UAEH.
 # Division → Plantel → Switches
 
+# pyrefly: ignore [missing-import]
 from django.db import models
 
 

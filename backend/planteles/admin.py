@@ -1,5 +1,7 @@
 # backend/planteles/admin.py
+# pyrefly: ignore [missing-import]
 from django.contrib import admin
+# pyrefly: ignore [missing-import]
 from .models import Division, Plantel
 
 @admin.register(Division)

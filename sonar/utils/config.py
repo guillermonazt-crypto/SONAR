@@ -65,6 +65,11 @@ def load_inventory() -> list[dict]:
             "site": "campus_central"
         }
     """
+    source = os.getenv("INVENTORY_SOURCE", "yaml")
+    if source == "django":
+        return load_django_inventory()
+    if source != "yaml":
+        raise ValueError("INVENTORY_SOURCE debe ser yaml o django")
     inventory_path = ROOT / "inventory" / "devices.yaml"
 
     if not inventory_path.exists():
@@ -72,8 +77,28 @@ def load_inventory() -> list[dict]:
         return []
 
     with open(inventory_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml.safe_load(f) or {}
 
     devices = data.get("devices", [])
     log.info(f"Inventario cargado: {len(devices)} dispositivos")
     return devices
+
+def load_django_inventory() -> list[dict]:
+    """Lectura ORM en el hilo del worker; no modifica Django."""
+    import sys
+    import django
+    backend_path = str(ROOT / "backend")
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    django.setup()
+    from django.db import connections, close_old_connections
+    from switches.models import Switch
+    close_old_connections()
+    try:
+        return [dict(hostname=s.hostname, name=s.nombre, role=s.rol,
+                     site=str(s.plantel))
+                for s in Switch.objects.filter(activo=True, plantel__activo=True)
+                .select_related('plantel__division')]
+    finally:
+        connections.close_all()

@@ -1,5 +1,5 @@
 ﻿# SONAR - Sistema de Observabilidad de Nodos y Analisis de Red
-# Dependencias Python 3.10+
+# Dependencias Python 3.12+
 
 # Recoleccion SNMP
 pysnmp==7.1.27
@@ -17,3 +17,7 @@ tenacity==8.2.3
 
 # Interfaz web
 flask==3.0.3
+# Backend Django
+Django==6.0.7
+djangorestframework==3.17.1
+django-cors-headers==4.9.0
