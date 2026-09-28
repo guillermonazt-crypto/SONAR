@@ -82,6 +82,13 @@ OID_SENSOR = {
     'value': '1.3.6.1.2.1.99.1.1.1.4',
     'status': '1.3.6.1.2.1.99.1.1.1.5',
 }
+OID_CISCO_SENSOR = {
+    'type': '1.3.6.1.4.1.9.9.91.1.1.1.1',
+    'scale': '1.3.6.1.4.1.9.9.91.1.1.1.2',
+    'precision': '1.3.6.1.4.1.9.9.91.1.1.1.3',
+    'value': '1.3.6.1.4.1.9.9.91.1.1.1.4',
+    'status': '1.3.6.1.4.1.9.9.91.1.1.1.5',
+}
 
 # Interfaces que corresponden a conectores del panel frontal.  Las interfaces
 # de gestión, VLAN, stack y AppGigabit también aparecen en IF-MIB, pero no son
@@ -357,6 +364,12 @@ async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict
         names, types, scales, precisions, values, statuses = await asyncio.gather(
             *(_walk_oid_rows(ip, community, oid) for oid in OID_SENSOR.values())
         )
+        # IOS-XE commonly exposes DOM through the Cisco enterprise MIB when
+        # the standard ENTITY-SENSOR-MIB is empty.
+        if not values:
+            types, scales, precisions, values, statuses = await asyncio.gather(
+                *(_walk_oid_rows(ip, community, oid) for oid in OID_CISCO_SENSOR.values())
+            )
     except Exception as error:
         log.debug(f"[{dispositivo.get('name', ip)}] Sensores ópticos no disponibles: {error}")
         return []
