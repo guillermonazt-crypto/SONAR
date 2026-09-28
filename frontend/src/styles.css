@@ -561,6 +561,19 @@ footer {
   padding: 4px;
   border-radius: 3px;
 }
+.traffic-chart {
+  height: 180px;
+  width: min(100%, 520px);
+  margin-top: 12px;
+  padding: 8px;
+  background: #11141a;
+  border: 1px solid #2a2d3a;
+  border-radius: 6px;
+}
+.traffic-pending {
+  font-size: 12px;
+  margin: 8px 0 0;
+}
 .port-up .port-led {
   background: #2ed573;
   color: #2ed573;

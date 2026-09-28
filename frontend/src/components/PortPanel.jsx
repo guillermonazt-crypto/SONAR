@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Chart, CategoryScale, LinearScale, BarElement, BarController, Tooltip, Legend } from "chart.js";
+
+Chart.register(CategoryScale, LinearScale, BarElement, BarController, Tooltip, Legend);
 
 const statusText = {
   up: "Activo",
@@ -68,6 +71,37 @@ function formatRate(value) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)} Mbps`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(2)} Kbps`;
   return `${value} bps`;
+}
+
+function TrafficChart({ input, output }) {
+  const canvas = useRef(null);
+  useEffect(() => {
+    if (!canvas.current || !Number.isFinite(input) || !Number.isFinite(output)) return undefined;
+    const chart = new Chart(canvas.current, {
+      type: "bar",
+      data: {
+        labels: ["Entrada", "Salida"],
+        datasets: [{
+          label: "Consumo",
+          data: [input, output],
+          backgroundColor: ["#00d4ff", "#9b7bff"],
+          borderRadius: 5,
+          barThickness: 28,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatRate(context.raw) } } },
+        scales: {
+          y: { beginAtZero: true, ticks: { color: "#a4abba", callback: (value) => formatRate(value) }, grid: { color: "#34394b" } },
+          x: { ticks: { color: "#c8d0df" }, grid: { display: false } },
+        },
+      },
+    });
+    return () => chart.destroy();
+  }, [input, output]);
+  return <div className="traffic-chart"><canvas ref={canvas} aria-label="Gráfica de consumo del puerto" /></div>;
 }
 
 export default function PortPanel({ device, items, loading, onClose }) {
@@ -336,6 +370,11 @@ export default function PortPanel({ device, items, loading, onClose }) {
                     <br />
                     Salida: <strong>{formatRate(rates[selected.id]?.output ?? NaN)}</strong>
                     <small>Calculado en memoria entre las dos últimas lecturas SNMP. No se guarda en la base.</small>
+                    {rates[selected.id] ? (
+                      <TrafficChart input={rates[selected.id].input} output={rates[selected.id].output} />
+                    ) : (
+                      <p className="traffic-pending">Esperando la siguiente lectura para graficar el consumo…</p>
+                    )}
                   </dd>
                 </div>
                 <div className="port-note">
