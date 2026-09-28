@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import Sites from "./Sites";
+import SonarDataTable from "./DataTable";
 const blank = {
   nombre: "",
   hostname: "",
@@ -73,6 +74,37 @@ export default function Inventory({ user }) {
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  const columns = [
+    {
+      name: "Dispositivo",
+      sortable: true,
+      grow: 1.5,
+      selector: (d) => d.nombre,
+      cell: (d) => <div><strong>{d.nombre}</strong><small>{d.hostname} · {d.modelo || "Modelo pendiente"} · {d.activo ? "Activo" : "Inactivo"}</small></div>,
+    },
+    {
+      name: "Rol / Plantel",
+      sortable: true,
+      selector: (d) => `${d.rol} ${d.plantel_nombre || ""}`,
+      cell: (d) => <div><span className={`badge ${d.rol}`}>{d.rol}</span><small>{d.plantel_nombre}</small></div>,
+    },
+    { name: "CPU 5m", sortable: true, selector: (d) => d.cpu_5m ?? -1, cell: (d) => d.cpu_5m === null ? "Sin lectura" : `${d.cpu_5m}%` },
+    {
+      name: "Última consulta",
+      sortable: true,
+      selector: (d) => d.ultima_consulta || "",
+      cell: (d) => d.ultima_consulta ? <div><small>{new Date(d.ultima_consulta).toLocaleString()}</small>{d.lectura_correcta ? "Recibida" : "Sin respuesta"}</div> : "Pendiente",
+    },
+    {
+      name: "Acciones",
+      button: true,
+      omit: !user.can_edit,
+      cell: (d) => <div className="actions">
+        <button onClick={() => { setEditing(d.id); setForm({ nombre: d.nombre, hostname: d.hostname, rol: d.rol, plantel: d.plantel, activo: d.activo }); }}>Editar</button>
+        <button disabled={busy} onClick={() => toggle(d)}>{d.activo ? "Desactivar" : "Activar"}</button>
+      </div>,
+    },
+  ];
   return (
     <>
       <div className="stats">
@@ -112,78 +144,8 @@ export default function Inventory({ user }) {
           {loading ? (
             <p role="status">Cargando inventario…</p>
           ) : (
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Dispositivo</th>
-                    <th>Rol / Plantel</th>
-                    <th>CPU 5m</th>
-                    <th>Última consulta</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((d) => (
-                    <tr key={d.id}>
-                      <td>
-                        <strong>{d.nombre}</strong>
-                        <small>
-                          {d.hostname} · {d.modelo || "Modelo pendiente"} ·{" "}
-                          {d.activo ? "Activo" : "Inactivo"}
-                        </small>
-                      </td>
-                      <td>
-                        <span className={`badge ${d.rol}`}>{d.rol}</span>
-                        <small>{d.plantel_nombre}</small>
-                      </td>
-                      <td>
-                        {d.cpu_5m === null ? "Sin lectura" : `${d.cpu_5m}%`}
-                      </td>
-                      <td>
-                        {d.ultima_consulta ? (
-                          <>
-                            <small>
-                              {new Date(d.ultima_consulta).toLocaleString()}
-                            </small>
-                            {d.lectura_correcta ? "Recibida" : "Sin respuesta"}
-                          </>
-                        ) : (
-                          "Pendiente"
-                        )}
-                      </td>
-                      <td>
-                        <div className="actions">
-                          {user.can_edit && (
-                            <>
-                              <button
-                                onClick={() => {
-                                  setEditing(d.id);
-                                  setForm({
-                                    nombre: d.nombre,
-                                    hostname: d.hostname,
-                                    rol: d.rol,
-                                    plantel: d.plantel,
-                                    activo: d.activo,
-                                  });
-                                }}
-                              >
-                                Editar
-                              </button>
-                              <button disabled={busy} onClick={() => toggle(d)}>
-                                {d.activo ? "Desactivar" : "Activar"}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!filtered.length && (
-                <p className="empty">No hay dispositivos para mostrar.</p>
-              )}
+            <div className="table-scroll sonar-table">
+              <SonarDataTable columns={columns} data={filtered} noDataComponent="No hay dispositivos para mostrar." />
             </div>
           )}
         </section>

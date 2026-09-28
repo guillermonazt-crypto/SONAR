@@ -14,6 +14,9 @@ importers:
       react:
         specifier: ^19.1.0
         version: 19.3.0
+      react-data-table-component:
+        specifier: ^8.10.0
+        version: 8.10.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react-dom:
         specifier: ^19.1.0
         version: 19.3.0(react@19.3.0)
@@ -823,6 +826,12 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  react-data-table-component@8.10.0:
+    resolution: {integrity: sha512-0btFdzH/744O+5C7KEC0kf2+9US0WCqUNoHJJpZ2PVc4wXCIGkyeTauOgqub8K/1GEEwnBdXX/aRt9n6HFLKbg==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
 
   react-dom@19.3.0:
     resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
@@ -1725,6 +1734,11 @@ snapshots:
       react-is: 17.0.2
 
   punycode@2.3.1: {}
+
+  react-data-table-component@8.10.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
 
   react-dom@19.3.0(react@19.3.0):
     dependencies:
