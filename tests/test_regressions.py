@@ -22,7 +22,7 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cpu, dict(cpu_5m=None, cpu_1m=None, cpu_5s=0))
 
     async def test_missing_interface_readings(self):
-        with patch.object(snmp, "_walk_oid", AsyncMock(side_effect=[{"1":"Gi1"}, {}, {"1":"0"}, {}, {}])):
+        with patch.object(snmp, "_walk_oid", AsyncMock(side_effect=[{"1":"GigabitEthernet1/0/1"}, {"1":"6"}, {}, {"1":"0"}, {}, {}, {}, {}, {}])):
             result = (await snmp.obtener_interfaces(DEVICE))[0]
         self.assertEqual(result["estado"], "unknown")
         self.assertEqual(result["errores_entrada"], 0)

@@ -35,6 +35,8 @@ class Switch(models.Model):
     cpu_5s = models.IntegerField(null=True, blank=True)
     cpu_1m = models.IntegerField(null=True, blank=True)
     cpu_5m = models.IntegerField(null=True, blank=True)
+    modelo = models.CharField(max_length=100, null=True, blank=True)
+    firmware = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
         verbose_name = "Switch"
@@ -65,15 +67,22 @@ class Puerto(models.Model):
         related_name='puertos'
     )
     nombre         = models.CharField(max_length=50)   # GigabitEthernet1/0/1
+    descripcion    = models.TextField(null=True, blank=True)
     indice         = models.IntegerField()              # ifIndex SNMP
     estado         = models.CharField(max_length=20, choices=ESTADOS, default='gris')
     vlan           = models.IntegerField(null=True, blank=True)
     voice_vlan     = models.IntegerField(null=True, blank=True)
     es_trunk       = models.BooleanField(default=False)
     estado_operativo = models.CharField(max_length=20, default="unknown")
+    ip_equipo = models.TextField(null=True, blank=True)
+    mac_equipo = models.TextField(null=True, blank=True)
+    mac_telefono = models.TextField(null=True, blank=True)
+    dhcp = models.BooleanField(null=True, blank=True)
     errores_crc = models.BigIntegerField(null=True, blank=True)
     errores_entrada = models.BigIntegerField(null=True, blank=True)
     errores_salida  = models.BigIntegerField(null=True, blank=True)
+    octetos_entrada = models.BigIntegerField(null=True, blank=True)
+    octetos_salida  = models.BigIntegerField(null=True, blank=True)
     actualizado    = models.DateTimeField(auto_now=True)
 
     class Meta:

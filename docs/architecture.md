@@ -63,6 +63,10 @@ Errores de validación: 400. Sin sesión o permiso: 403. Login inválido: 401.
 
 SNMP conserva ifIndex para identificar interfaces. Un contador ausente se guarda
 como null; 0 es válido. estado_operativo es independiente de estado (color manual).
+Cada puerto puede incluir ip_equipo y mac_equipo correlacionados desde ARP + FDB,
+mac_telefono desde vecinos CDP `SEP...`, vlan desde CISCO-VLAN-MEMBERSHIP-MIB y
+voice_vlan desde `vmVoiceVlanId`. dhcp queda null cuando DHCP snooping no está
+habilitado o el agente no expone su tabla; la interfaz lo muestra como no publicado.
 Un sondeo fallido elimina métricas actuales y marca lectura_correcta=false.
 Puertos ausentes en un sondeo pasan a unknown; actualizado conserva la fecha de
 la última observación directa. CPU y puertos se muestran junto a sus fechas.

@@ -18,6 +18,7 @@ from pysnmp.hlapi.asyncio import (
     walk_cmd,
 )
 import asyncio
+import re
 
 from sonar.utils.logger import get_logger
 from sonar.utils import config
@@ -35,11 +36,55 @@ OIDS_CPU = {
 
 OID_IF_TABLE = {
     'ifDescr':      '1.3.6.1.2.1.2.2.1.2',
+    'ifType':       '1.3.6.1.2.1.2.2.1.3',
     'ifOperStatus': '1.3.6.1.2.1.2.2.1.8',
     'ifInErrors':   '1.3.6.1.2.1.2.2.1.14',
     'ifOutErrors':  '1.3.6.1.2.1.2.2.1.20',
     'ifInCRCErrs':  '1.3.6.1.2.1.16.1.1.1.8',
+    'ifAlias':      '1.3.6.1.2.1.31.1.1.1.18',
+    'ifHCInOctets': '1.3.6.1.2.1.31.1.1.1.6',
+    'ifHCOutOctets': '1.3.6.1.2.1.31.1.1.1.10',
 }
+
+OID_NETWORK = {
+    # ARP: ifIndex + IPv4 -> MAC and IPv4 address.
+    'arp_mac': '1.3.6.1.2.1.4.22.1.2',
+    'arp_ip': '1.3.6.1.2.1.4.22.1.3',
+    # Bridge FDB MAC -> bridge port; bridge port -> ifIndex.
+    'fdb_mac': '1.3.6.1.2.1.17.4.3.1.1',
+    'fdb_port': '1.3.6.1.2.1.17.4.3.1.2',
+    'bridge_if': '1.3.6.1.2.1.17.1.4.1.2',
+    # Cisco access VLAN and CDP neighbor identity.
+    'access_vlan': '1.3.6.1.4.1.9.9.68.1.2.2.1.2',
+    'voice_vlan': '1.3.6.1.4.1.9.9.68.1.5.1.1.1',
+    'cdp_device': '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
+}
+
+OID_DEVICE = {
+    'sys_descr': '1.3.6.1.2.1.1.1.0',
+    'model': '1.3.6.1.2.1.47.1.1.1.1.13',
+}
+
+# Interfaces que corresponden a conectores del panel frontal.  Las interfaces
+# de gestión, VLAN, stack y AppGigabit también aparecen en IF-MIB, pero no son
+# puertos físicos que deban dibujarse en el inventario.
+PHYSICAL_INTERFACE_RE = re.compile(
+    r'^(?:FastEthernet0/\d+|GigabitEthernet0/[1-9]\d*|'
+    r'GigabitEthernet\d+/\d+/\d+|TenGigabitEthernet\d+/\d+/\d+|'
+    r'TwentyFiveGigE\d+/\d+/\d+|FortyGigabitEthernet\d+/\d+/\d+)$'
+)
+GENERIC_PHYSICAL_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_.-]*\d+/\d+(?:/\d+)?$')
+
+
+def es_interfaz_fisica(nombre: str) -> bool:
+    nombre = (nombre or '').strip()
+    if any(token in nombre.lower() for token in ('management', 'appgigabit', 'bluetooth', 'stack', 'port-channel', 'portchannel', 'vlan', 'loopback', 'tunnel', 'null', 'unrouted')):
+        return False
+    if nombre.endswith('/0/0') or nombre.endswith('0/0'):
+        return False
+    if PHYSICAL_INTERFACE_RE.fullmatch(nombre):
+        return True
+    return bool(GENERIC_PHYSICAL_NAME_RE.fullmatch(nombre))
 
 
 def _safe_int(value: str, default: int | None = None) -> int | None:
@@ -102,6 +147,127 @@ async def _walk_oid(ip: str, community: str, oid: str) -> dict:
     return resultados
 
 
+async def _walk_oid_rows(ip: str, community: str, oid: str) -> list[tuple[list[int], object]]:
+    """Conserva todo el índice de una tabla SNMP para correlacionar ARP/FDB/CDP."""
+    rows = []
+    async for error_indication, error_status, _error_index, var_binds in walk_cmd(
+        SnmpEngine(), CommunityData(community, mpModel=1),
+        await UdpTransportTarget.create((ip, config.SNMP_PORT),
+                                        timeout=config.SNMP_TIMEOUT,
+                                        retries=config.SNMP_RETRIES),
+        ContextData(), ObjectType(ObjectIdentity(oid)), lexicographicMode=False
+    ):
+        if error_indication or error_status:
+            break
+        for var_bind in var_binds:
+            suffix = [int(part) for part in str(var_bind[0]).split('.')[len(oid.split('.')):]]
+            rows.append((suffix, var_bind[1]))
+    return rows
+
+
+def _octets(value: object) -> bytes:
+    if hasattr(value, 'asOctets'):
+        return bytes(value.asOctets())
+    if isinstance(value, bytes):
+        return value
+    return str(value).encode('latin1', errors='ignore')
+
+
+def _format_mac(value: object) -> str | None:
+    raw = _octets(value)
+    if len(raw) != 6:
+        return None
+    return ':'.join(f'{byte:02x}' for byte in raw)
+
+
+def _format_mac_text(value: str) -> str | None:
+    compact = ''.join(ch for ch in value.upper() if ch in '0123456789ABCDEF')
+    if len(compact) != 12:
+        return None
+    return ':'.join(compact[index:index + 2] for index in range(0, 12, 2)).lower()
+
+
+async def obtener_red_interfaces(dispositivo: dict) -> dict[int, dict]:
+    """Correlaciona VLAN, ARP, MAC aprendida y teléfonos CDP por ifIndex.
+
+    DHCP snooping y voice VLAN no se rellenan con una suposición: quedan None
+    cuando el agente SNMP no los publica.
+    """
+    ip = dispositivo['hostname']
+    community = config.SNMP_COMMUNITY
+    try:
+        arp_mac, arp_ip, fdb_mac, fdb_port, bridge_if, access_vlan, voice_vlan, cdp_device = await asyncio.gather(
+            *(_walk_oid_rows(ip, community, oid) for oid in OID_NETWORK.values())
+        )
+    except Exception as error:
+        log.warning(f"[{dispositivo.get('name', ip)}] Metadatos de red no disponibles: {error}")
+        return {}
+
+    bridge_to_if = {suffix[0]: _safe_int(str(value)) for suffix, value in bridge_if if suffix}
+    mac_to_bridge = {}
+    for suffix, value in fdb_port:
+        if len(suffix) >= 6:
+            mac_to_bridge[tuple(suffix[-6:])] = _safe_int(str(value))
+    mac_to_if = {
+        mac: bridge_to_if.get(bridge)
+        for mac, bridge in mac_to_bridge.items()
+        if bridge is not None
+    }
+    ip_by_mac = {}
+    for suffix, value in arp_mac:
+        if len(suffix) >= 5:
+            ip_by_mac[_octets(value)] = '.'.join(str(part) for part in suffix[-4:])
+    # Prefer the address from the ARP index, which is robust on IOS-XE.
+    for suffix, value in arp_ip:
+        if len(suffix) >= 5:
+            ip_by_mac.setdefault(_octets(value), '.'.join(str(part) for part in suffix[-4:]))
+
+    result = {}
+    for mac_bytes, if_index in mac_to_if.items():
+        if if_index is None:
+            continue
+        mac = ':'.join(f'{part:02x}' for part in mac_bytes)
+        item = result.setdefault(if_index, {'ips': [], 'macs': [], 'phones': []})
+        if mac.startswith(('01:', '33:33:')):
+            continue
+        if mac not in item['macs']:
+            item['macs'].append(mac)
+        mac_bytes_value = bytes(mac_bytes)
+        if mac_bytes_value in ip_by_mac and ip_by_mac[mac_bytes_value] not in item['ips']:
+            item['ips'].append(ip_by_mac[mac_bytes_value])
+
+    for suffix, value in cdp_device:
+        if len(suffix) < 2:
+            continue
+        candidate = str(value)
+        if not candidate.upper().startswith('SEP'):
+            continue
+        phone_mac = _format_mac_text(candidate[3:])
+        if phone_mac:
+            result.setdefault(suffix[0], {'ips': [], 'macs': [], 'phones': []})['phones'].append(phone_mac)
+
+    vlan_by_if = {suffix[-1]: _safe_int(str(value)) for suffix, value in access_vlan if suffix}
+    voice_vlan_by_if = {
+        suffix[-1]: (None if _safe_int(str(value)) in (None, 0, 4096) else _safe_int(str(value)))
+        for suffix, value in voice_vlan if suffix
+    }
+    return {
+        if_index: {
+            'ip_equipo': ', '.join(values['ips']) or None,
+            'mac_equipo': ', '.join(values['macs']) or None,
+            'mac_telefono': ', '.join(values['phones']) or None,
+            'vlan': vlan_by_if.get(if_index),
+            'voice_vlan': voice_vlan_by_if.get(if_index),
+            'dhcp': None,
+        }
+        for if_index, values in result.items()
+    } | {
+        if_index: {'vlan': vlan, 'voice_vlan': voice_vlan_by_if.get(if_index), 'dhcp': None,
+                   'ip_equipo': None, 'mac_equipo': None, 'mac_telefono': None}
+        for if_index, vlan in vlan_by_if.items() if if_index not in result
+    }
+
+
 async def obtener_cpu(dispositivo: dict) -> dict | None:
     """
     Consulta el CPU del switch via SNMP en paralelo.
@@ -128,6 +294,22 @@ async def obtener_cpu(dispositivo: dict) -> dict | None:
     return cpu
 
 
+async def obtener_identidad(dispositivo: dict) -> dict:
+    """Obtiene el modelo físico y la versión IOS-XE del equipo."""
+    ip = dispositivo['hostname']
+    community = config.SNMP_COMMUNITY
+    descr, model_rows = await asyncio.gather(
+        _get_oid(ip, community, OID_DEVICE['sys_descr']),
+        _walk_oid_rows(ip, community, OID_DEVICE['model']),
+    )
+    model = next((str(value) for _suffix, value in model_rows if str(value).strip()), None)
+    version = None
+    if descr:
+        match = re.search(r'Version\s+([^,\s]+)', descr)
+        version = match.group(1) if match else None
+    return {'modelo': model or None, 'firmware': version}
+
+
 async def obtener_interfaces(dispositivo: dict) -> list | None:
     """
     Consulta el estado y errores de todas las interfaces via SNMP walk en paralelo.
@@ -140,17 +322,22 @@ async def obtener_interfaces(dispositivo: dict) -> list | None:
     if not nombres:
         return None
 
-    estados, in_err, out_err, crc_err = await asyncio.gather(
+    tipos, estados, in_err, out_err, crc_err, aliases, in_octets, out_octets = await asyncio.gather(
+        _walk_oid(ip, community, OID_IF_TABLE['ifType']),
         _walk_oid(ip, community, OID_IF_TABLE['ifOperStatus']),
         _walk_oid(ip, community, OID_IF_TABLE['ifInErrors']),
         _walk_oid(ip, community, OID_IF_TABLE['ifOutErrors']),
-        _walk_oid(ip, community, OID_IF_TABLE['ifInCRCErrs'])
+        _walk_oid(ip, community, OID_IF_TABLE['ifInCRCErrs']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifAlias']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifHCInOctets']),
+        _walk_oid(ip, community, OID_IF_TABLE['ifHCOutOctets'])
     )
 
     interfaces = []
     for idx, nombre_if in nombres.items():
-        # Ignorar interfaces virtuales
-        if any(x in nombre_if for x in ['Vlan', 'Loopback', 'Tunnel', 'Null']):
+        # IF-MIB incluye VLAN, gestión, stack y otras interfaces internas.
+        # ifType 6 = ethernetCsmacd, definido por IF-MIB y común a fabricantes.
+        if _safe_int(tipos.get(idx)) != 6 or not es_interfaz_fisica(nombre_if):
             continue
 
         estado_raw = estados.get(idx)
@@ -164,6 +351,10 @@ async def obtener_interfaces(dispositivo: dict) -> list | None:
             'errores_entrada': _safe_int(in_err.get(idx)),
             'errores_crc':     _safe_int(crc_err.get(idx)),
             'errores_salida':  _safe_int(out_err.get(idx)),
+            'descripcion':     (aliases.get(idx) or '').strip() or None,
+            'es_trunk':        bool(re.search(r'(?:GigabitEthernet0/[12]|(?:GigabitEthernet|TenGigabitEthernet|TwentyFiveGigE|FortyGigabitEthernet)\d+/1/\d+)$', nombre_if)),
+            'octetos_entrada': _safe_int(in_octets.get(idx)),
+            'octetos_salida':  _safe_int(out_octets.get(idx)),
         })
 
     log.debug(f"[{nombre}] {len(interfaces)} interfaces consultadas")
@@ -194,6 +385,11 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
         if interfaces is None:
             return None
 
+        red = await obtener_red_interfaces(dispositivo)
+        identidad = await obtener_identidad(dispositivo)
+        for interface in interfaces:
+            interface.update(red.get(interface['indice'], {}))
+
         return {
             'nombre':        nombre,
             'descripcion':   'Cisco IOS-XE',
@@ -205,6 +401,7 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
             'cpu_5m':        cpu['cpu_5m'],
             'interfaces':    interfaces,
             'transceptores': [],  # Fase siguiente
+            **identidad,
         }
 
     except Exception as e:

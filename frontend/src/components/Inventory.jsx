@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import Sites from "./Sites";
 const blank = {
   nombre: "",
   hostname: "",
@@ -13,7 +14,6 @@ export default function Inventory({ user }) {
     [sites, setSites] = useState([]),
     [form, setForm] = useState(blank),
     [editing, setEditing] = useState(null),
-    [ports, setPorts] = useState(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
@@ -35,6 +35,8 @@ export default function Inventory({ user }) {
   }
   useEffect(() => {
     refresh();
+    const timer = setInterval(refresh, 30000);
+    return () => clearInterval(timer);
   }, []);
   async function submit(e) {
     e.preventDefault();
@@ -64,16 +66,6 @@ export default function Inventory({ user }) {
       setError(e.message);
     } finally {
       setBusy(false);
-    }
-  }
-  async function showPorts(d) {
-    setPorts({ device: d, items: [], loading: true });
-    try {
-      const items = await api.ports(d.id);
-      setPorts({ device: d, items, loading: false });
-    } catch (e) {
-      setPorts(null);
-      setError(e.message);
     }
   }
   const filtered = devices.filter((d) =>
@@ -137,7 +129,8 @@ export default function Inventory({ user }) {
                       <td>
                         <strong>{d.nombre}</strong>
                         <small>
-                          {d.hostname} · {d.activo ? "Activo" : "Inactivo"}
+                          {d.hostname} · {d.modelo || "Modelo pendiente"} ·{" "}
+                          {d.activo ? "Activo" : "Inactivo"}
                         </small>
                       </td>
                       <td>
@@ -161,7 +154,6 @@ export default function Inventory({ user }) {
                       </td>
                       <td>
                         <div className="actions">
-                          <button onClick={() => showPorts(d)}>Puertos</button>
                           {user.can_edit && (
                             <>
                               <button
@@ -271,51 +263,10 @@ export default function Inventory({ user }) {
           </section>
         )}
       </div>
-      {ports && (
-        <section className="card ports">
-          <div className="section-title">
-            <h2>Puertos · {ports.device.nombre}</h2>
-            <button onClick={() => setPorts(null)}>Cerrar</button>
-          </div>
-          {ports.loading ? (
-            <p>Cargando…</p>
-          ) : (
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Interfaz</th>
-                    <th>Estado operativo</th>
-                    <th>Entrada</th>
-                    <th>Salida</th>
-                    <th>CRC</th>
-                    <th>Última observación</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ports.items.map((p) => (
-                    <tr key={p.id}>
-                      <td>{p.nombre}</td>
-                      <td>
-                        {p.estado_operativo === "unknown"
-                          ? "Desconocido"
-                          : p.estado_operativo}
-                      </td>
-                      <td>{value(p.errores_entrada)}</td>
-                      <td>{value(p.errores_salida)}</td>
-                      <td>{value(p.errores_crc)}</td>
-                      <td>{new Date(p.actualizado).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!ports.items.length && (
-                <p className="empty">Aún no hay lecturas de puertos.</p>
-              )}
-            </div>
-          )}
-        </section>
-      )}
+      <details className="inventory-secondary">
+        <summary>Administrar planteles y divisiones</summary>
+        <Sites user={user} />
+      </details>
     </>
   );
 }

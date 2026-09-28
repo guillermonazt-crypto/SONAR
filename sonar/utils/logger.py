@@ -9,6 +9,12 @@
 
 import logging
 import os
+import sys
+
+# Evitar errores cp1252 al redirigir logs en Windows.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(errors="replace")
 from rich.logging import RichHandler
 from rich.console import Console
 

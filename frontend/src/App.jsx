@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { api } from "./api/client";
 import Login from "./components/Login";
 import Inventory from "./components/Inventory";
-import Sites from "./components/Sites";
+import Monitoring from "./components/Monitoring";
+import Overview from "./components/Overview";
 export default function App() {
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
-    [tab, setTab] = useState("inventory");
+    [tab, setTab] = useState("monitoring");
   async function connect() {
     setLoading(true);
     setError("");
@@ -28,7 +29,7 @@ export default function App() {
     try {
       await api.logout();
       setUser(null);
-      setTab("inventory");
+      setTab("monitoring");
     } catch (e) {
       setError(e.message);
     }
@@ -63,9 +64,9 @@ export default function App() {
         <>
           <nav>
             {[
+              ["monitoring", "Monitoreo"],
               ["inventory", "Inventario"],
-              ["sites", "Planteles"],
-              ["dashboards", "Dashboards"],
+              ["overview", "Resumen"],
             ].map(([id, label]) => (
               <button
                 className={tab === id ? "active" : ""}
@@ -81,22 +82,22 @@ export default function App() {
               </a>
             )}
           </nav>
-          {tab === "inventory" ? (
+          {tab === "monitoring" ? (
+            <Monitoring />
+          ) : tab === "overview" ? (
+            <Overview dashboard={dashboard} />
+          ) : tab === "inventory" ? (
             <Inventory user={user} />
-          ) : tab === "sites" ? (
-            <Sites user={user} />
           ) : (
             <section className="card">
               <h2>Dashboards de red</h2>
               {dashboard ? (
-                <a
-                  className="primary link"
-                  href={dashboard}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Abrir Grafana ↗
-                </a>
+                <iframe
+                  title="Grafana · Monitoreo de red"
+                  src={dashboard}
+                  className="grafana-frame"
+                  allowFullScreen
+                />
               ) : (
                 <p>
                   Configura VITE_GRAFANA_URL en frontend/.env.local para abrir

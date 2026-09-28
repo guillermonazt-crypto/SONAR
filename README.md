@@ -57,6 +57,12 @@ Se incluye pnpm-lock.yaml para instalaciones reproducibles. Si pnpm no está en 
 usa la ruta de tu instalación de pnpm. El administrador Django permanece en
 http://127.0.0.1:8000/admin/ para usuarios y permisos.
 
+Para abrirlo desde otro equipo conectado a la misma red, inicia Vite y Django
+escuchando en `0.0.0.0` y abre `http://10.128.3.139:5173`. La API de Django
+queda en el puerto 8000 y Grafana en el 3000. Esta dirección depende de la IP
+Ethernet actual de la máquina; si cambia, actualiza `frontend/.env.local` y
+`DJANGO_ALLOWED_HOSTS`/`DJANGO_CSRF_ORIGINS`.
+
 INVENTORY_SOURCE=django conecta el worker al mismo inventario que React.
 Para iniciar sondeos reales, cuando estés listo: `python -m sonar.main`.
 No es necesario iniciar el worker para usar o probar la interfaz.
@@ -78,6 +84,12 @@ pnpm build
 
 Las pruebas usan mocks y bases temporales. Los scripts en scripts/local/ y
 scripts/check_snmp.py son manuales y pueden acceder a equipos o servicios reales.
+
+El panel frontal de puertos muestra la topología observada por `ifIndex`. Al
+seleccionar un puerto se ven IP/MAC aprendidas, VLAN, voice VLAN, MAC de teléfono
+y el estado de DHCP snooping. IP y MAC se correlacionan con ARP/FDB; los teléfonos
+se identifican mediante CDP. Un valor vacío significa que el switch no lo publicó,
+no que se haya convertido en cero.
 
 ## Datos locales y estructura
 

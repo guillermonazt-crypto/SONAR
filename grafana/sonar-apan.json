@@ -1,0 +1,165 @@
+{
+  "uid": "sonar-apan",
+  "title": "SONAR · Apan",
+  "schemaVersion": 39,
+  "version": 0,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU · promedio 5 minutos",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P7572CDECE0C4EB43"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P7572CDECE0C4EB43"
+          },
+          "query": "from(bucket: \"red_universitaria\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"cpu\" and r._field == \"cpu_5m\")\n  |> filter(fn: (r) => r.device =~ /^${device:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Errores de entrada por interfaz",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P7572CDECE0C4EB43"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P7572CDECE0C4EB43"
+          },
+          "query": "from(bucket: \"red_universitaria\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r._field == \"errores_entrada\")\n  |> filter(fn: (r) => r.device =~ /^${device:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Errores de salida por interfaz",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P7572CDECE0C4EB43"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P7572CDECE0C4EB43"
+          },
+          "query": "from(bucket: \"red_universitaria\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r._field == \"errores_salida\")\n  |> filter(fn: (r) => r.device =~ /^${device:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Errores CRC por interfaz",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P7572CDECE0C4EB43"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P7572CDECE0C4EB43"
+          },
+          "query": "from(bucket: \"red_universitaria\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r._field == \"errores_crc\")\n  |> filter(fn: (r) => r.device =~ /^${device:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "device",
+        "label": "Switch",
+        "type": "custom",
+        "query": "SW_1_APAN,SW_8_APAN",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "SW_1_APAN",
+          "value": "SW_1_APAN"
+        },
+        "options": [
+          {
+            "text": "SW_1_APAN",
+            "value": "SW_1_APAN",
+            "selected": true
+          },
+          {
+            "text": "SW_8_APAN",
+            "value": "SW_8_APAN",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  }
+}

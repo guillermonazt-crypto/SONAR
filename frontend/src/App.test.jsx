@@ -16,11 +16,13 @@ vi.mock("./api/client", () => ({
     list: vi.fn(),
     save: vi.fn(),
     ports: vi.fn(),
+    zabbix: vi.fn(),
   },
 }));
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
+  api.zabbix.mockResolvedValue({ configured: false, hosts: [], detail: "No configurado" });
   api.list.mockImplementation((resource) =>
     Promise.resolve(
       resource === "switches"
@@ -56,7 +58,7 @@ describe("SONAR", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
     expect(await screen.findByText("SW-LAB")).toBeInTheDocument();
-    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByText("Sin respuesta")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Guardar switch" }),
     ).not.toBeInTheDocument();
@@ -73,15 +75,26 @@ describe("SONAR", () => {
     api.ports.mockResolvedValue([
       {
         id: 1,
-        nombre: "Gi1",
+        nombre: "GigabitEthernet1/0/1",
+        descripcion: "Puesto recepción",
+        es_trunk: false,
         estado_operativo: "unknown",
         errores_entrada: null,
         errores_salida: 0,
         errores_crc: null,
         actualizado: "2026-01-01T00:00:00Z",
+        ip_equipo: "192.0.2.20",
+        mac_equipo: "00:11:22:33:44:55",
+        mac_telefono: null,
+        vlan: 20,
+        voice_vlan: 10,
+        dhcp: null,
+        trafico_entrada_bps: 1250000,
+        trafico_salida_bps: 320000,
       },
     ]);
     render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inventario" }));
     fireEvent.change(await screen.findByLabelText("Nombre del switch"), {
       target: { value: "Nuevo" },
     });
@@ -106,9 +119,27 @@ describe("SONAR", () => {
         null,
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Puertos" }));
-    expect(await screen.findByText("Desconocido")).toBeInTheDocument();
-    expect(screen.getAllByText("Sin lectura").length).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Monitoreo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver puertos" }));
+    expect(
+      await screen.findByRole("button", {
+        name: "GigabitEthernet1/0/1: Desconocido; 0 errores",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "GigabitEthernet1/0/1: Desconocido; 0 errores" })).toHaveTextContent("1");
+    expect(
+      screen.getByRole("button", {
+        name: "GigabitEthernet1/0/1: Desconocido; 0 errores",
+      }),
+    ).toHaveClass("port-voice");
+    expect(screen.getByText("Ámbar · sin lectura")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "GigabitEthernet1/0/1: Desconocido; 0 errores",
+      }),
+    );
+    expect(screen.getByText("192.0.2.20")).toBeInTheDocument();
+    expect(screen.getByText("00:11:22:33:44:55")).toBeInTheDocument();
   });
   it("muestra error y permite reintentar conexión", async () => {
     api.session
