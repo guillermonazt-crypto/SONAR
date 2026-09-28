@@ -26,7 +26,7 @@ tests/               Pruebas offline del worker
 docs/                Arquitectura y contrato de API
 inventory/            Inventario YAML opcional y privado
 data/                Datos locales
-grafana/             Configuración Grafana
+grafana/             Configuración histórica opcional
 ```
 
 ## Iniciar en desarrollo
@@ -59,15 +59,43 @@ http://127.0.0.1:8000/admin/ para usuarios y permisos.
 
 Para abrirlo desde otro equipo conectado a la misma red, inicia Vite y Django
 escuchando en `0.0.0.0` y abre `http://10.128.3.139:5173`. La API de Django
-queda en el puerto 8000 y Grafana en el 3000. Esta dirección depende de la IP
-Ethernet actual de la máquina; si cambia, actualiza `frontend/.env.local` y
+queda en el puerto 8000. Esta dirección depende de la IP Ethernet actual de la
+máquina; si cambia, actualiza `frontend/.env.local` y
 `DJANGO_ALLOWED_HOSTS`/`DJANGO_CSRF_ORIGINS`.
 
 INVENTORY_SOURCE=django conecta el worker al mismo inventario que React.
 Para iniciar sondeos reales, cuando estés listo: `python -m sonar.main`.
 No es necesario iniciar el worker para usar o probar la interfaz.
-Configura frontend/.env.local con VITE_GRAFANA_URL para habilitar el enlace a Grafana.
-Las variables VITE_* son públicas: nunca pongas secretos en ellas.
+Las variables `VITE_*` son públicas: nunca pongas secretos en ellas.
+
+## Monitoreo
+
+La pestaña **Monitoreo** agrupa los switches por plantel en carpetas expandibles.
+El panel físico reconoce interfaces de Catalyst antiguos y actuales, además de
+formatos comunes de otros fabricantes. La clasificación física usa `IF-MIB.ifType`
+y descarta interfaces lógicas como VLAN, Loopback, Stack y Port-channel.
+
+Al seleccionar un puerto se muestran descripción, estado, errores, IP/MAC, VLAN,
+Voice VLAN, MAC del teléfono y tráfico de entrada/salida. La velocidad se calcula
+en memoria entre dos lecturas consecutivas y no se guarda como historial en Django;
+el panel actualiza la lectura cada tres minutos.
+
+Los datos de voz, CDP, VLAN y DHCP snooping se muestran sólo cuando el equipo los
+publica. Los OID específicos de un fabricante son enriquecimientos opcionales;
+estado, alias, errores y tráfico se obtienen con MIBs estándar.
+
+## Integración opcional con Zabbix
+
+SONAR puede consultar los hosts publicados por Zabbix desde **Resumen**. Configura
+estas variables en `.env` y reinicia Django:
+
+```env
+ZABBIX_URL=http://servidor-zabbix/zabbix
+ZABBIX_TOKEN=
+```
+
+La integración es de sólo lectura. Zabbix puede encargarse de métricas, históricos
+y alertas SNMP, mientras SONAR conserva la vista física y el inventario por plantel.
 
 ## Pruebas sin switches reales
 
