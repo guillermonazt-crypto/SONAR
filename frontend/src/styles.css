@@ -307,6 +307,24 @@ form .primary {
 .ports {
   margin-top: 24px;
 }
+.port-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: #05070ccc;
+  backdrop-filter: blur(3px);
+}
+.port-modal {
+  width: min(1180px, 100%);
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  margin: 0;
+  box-shadow: 0 24px 80px #000b;
+}
 .login {
   max-width: 440px;
   margin: 70px auto;
@@ -377,6 +395,8 @@ footer {
     width: 100%;
   }
   .monitor-device { grid-template-columns: 1fr; gap: 8px; }
+  .port-modal-backdrop { padding: 10px; align-items: flex-start; }
+  .port-modal { max-height: calc(100vh - 20px); }
 }
 .card {
   min-width: 0;

@@ -133,6 +133,13 @@ export default function PortPanel({ device, items, loading, onClose }) {
   const [selected, setSelected] = useState(null);
   const [rates, setRates] = useState({});
   const [history, setHistory] = useState({});
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const previousTraffic = useRef(new Map());
   useEffect(() => {
     const now = Date.now();
@@ -222,11 +229,12 @@ export default function PortPanel({ device, items, loading, onClose }) {
     );
   };
   return (
-    <section className="card ports" aria-live="polite">
+    <div className="port-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="card ports port-modal" role="dialog" aria-modal="true" aria-labelledby="port-panel-title" aria-live="polite">
       <div className="section-title">
         <div>
           <span className="eyebrow">VISTA FÍSICA</span>
-          <h2>Puertos · {device.nombre}</h2>
+          <h2 id="port-panel-title">Puertos · {device.nombre}</h2>
           <small>
             {device.hostname} · coloca el cursor sobre un puerto para ver su
             estado
@@ -422,5 +430,6 @@ export default function PortPanel({ device, items, loading, onClose }) {
         </>
       )}
     </section>
+    </div>
   );
 }
