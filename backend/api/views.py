@@ -4,6 +4,10 @@ from django.middleware.csrf import get_token
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 import re
+import os
+from datetime import timedelta
+from django.utils import timezone
+from influxdb_client import InfluxDBClient
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -59,6 +63,37 @@ def sign_out(request):
 @require_GET
 def zabbix(request):
     return JsonResponse(zabbix_status())
+
+@require_GET
+def port_history(request, pk=None):
+    """Devuelve la serie histórica de tráfico de un puerto desde InfluxDB."""
+    port = Puerto.objects.select_related('switch').filter(pk=pk).first()
+    if port is None:
+        return JsonResponse({'points': []}, status=404)
+    url = os.getenv('INFLUX_URL', 'http://localhost:8086')
+    token = os.getenv('INFLUX_TOKEN', '')
+    org = os.getenv('INFLUX_ORG', 'universidad')
+    bucket = os.getenv('INFLUX_BUCKET', 'red_universitaria')
+    flux = f'''from(bucket: "{bucket}")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "interfaces")
+  |> filter(fn: (r) => r.device == "{port.switch.nombre}" and r.interface == "{port.nombre}")
+  |> filter(fn: (r) => r._field == "octetos_entrada" or r._field == "octetos_salida")
+  |> aggregateWindow(every: 3m, fn: last, createEmpty: false)
+  |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")'''
+    try:
+        with InfluxDBClient(url=url, token=token, org=org) as client:
+            rows = client.query_api().query(flux, org=org)
+        points = []
+        for table in rows:
+            for record in table.records:
+                values = record.values
+                points.append({'time': record.get_time().isoformat(),
+                               'entrada': values.get('octetos_entrada'),
+                               'salida': values.get('octetos_salida')})
+        return JsonResponse({'points': points})
+    except Exception as error:
+        return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
 
 class InventoryViewSet(viewsets.ModelViewSet):
     permission_classes = [InventoryPermission]

@@ -89,9 +89,12 @@ class InfluxWriter:
                 .field("estado", intf["estado"])
                 .field("errores_entrada", intf["errores_entrada"])
                 .field("errores_crc",     intf["errores_crc"])
-                .field("errores_salida",  intf["errores_salida"])
                 .time(datetime.now(timezone.utc), WritePrecision.S)
             )
+            for field in ('errores_entrada', 'errores_crc', 'errores_salida', 'octetos_entrada', 'octetos_salida'):
+                value = intf.get(field)
+                if value is not None:
+                    punto.field(field, value)
 
             self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
 

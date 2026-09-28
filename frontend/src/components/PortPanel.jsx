@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Chart, CategoryScale, LinearScale, BarElement, BarController, Tooltip, Legend } from "chart.js";
+import { Chart, CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend } from "chart.js";
+import { api } from "../api/client";
 
-Chart.register(CategoryScale, LinearScale, BarElement, BarController, Tooltip, Legend);
+Chart.register(CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend);
 
 const statusText = {
   up: "Activo",
@@ -104,9 +105,34 @@ function TrafficChart({ input, output }) {
   return <div className="traffic-chart"><canvas ref={canvas} aria-label="Gráfica de consumo del puerto" /></div>;
 }
 
+function HistoryChart({ points }) {
+  const canvas = useRef(null);
+  useEffect(() => {
+    if (!canvas.current || !points.length) return undefined;
+    const chart = new Chart(canvas.current, {
+      type: "line",
+      data: {
+        labels: points.map((point) => new Date(point.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+        datasets: [
+          { label: "Entrada acumulada", data: points.map((point) => point.entrada), borderColor: "#00d4ff", backgroundColor: "#00d4ff33", tension: 0.25 },
+          { label: "Salida acumulada", data: points.map((point) => point.salida), borderColor: "#9b7bff", backgroundColor: "#9b7bff33", tension: 0.25 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c8d0df" } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatBytes(context.raw)}` } } },
+        scales: { y: { ticks: { color: "#a4abba", callback: (value) => formatBytes(value) }, grid: { color: "#34394b" } }, x: { ticks: { color: "#a4abba" }, grid: { display: false } } },
+      },
+    });
+    return () => chart.destroy();
+  }, [points]);
+  return <div className="traffic-chart history-chart"><canvas ref={canvas} aria-label="Histórico de tráfico del puerto" /></div>;
+}
+
 export default function PortPanel({ device, items, loading, onClose }) {
   const [selected, setSelected] = useState(null);
   const [rates, setRates] = useState({});
+  const [history, setHistory] = useState({});
   const previousTraffic = useRef(new Map());
   useEffect(() => {
     const now = Date.now();
@@ -174,7 +200,15 @@ export default function PortPanel({ device, items, loading, onClose }) {
         key={port.id}
         data-tooltip={`${port.nombre}${port.descripcion ? ` · ${port.descripcion}` : ""} · ${statusText[state]}${trunk ? " · TRUNK" : ""}${voice ? ` · Voice VLAN ${port.voice_vlan}` : ""}${damaged ? " · DAÑADO" : ""} · ${errors} errores`}
         aria-label={`${port.nombre}: ${statusText[state]}; ${errors} errores`}
-        onClick={() => setSelected(port)}
+        onClick={async () => {
+          setSelected(port);
+          try {
+            const result = await api.portHistory(port.id);
+            setHistory((current) => ({ ...current, [port.id]: result.points || [] }));
+          } catch {
+            setHistory((current) => ({ ...current, [port.id]: [] }));
+          }
+        }}
       >
         <span className="port-led status-led" aria-hidden="true" />
         {voice && <span className="port-led voice-led" aria-label="Voice VLAN" />}
@@ -375,6 +409,7 @@ export default function PortPanel({ device, items, loading, onClose }) {
                     ) : (
                       <p className="traffic-pending">Esperando la siguiente lectura para graficar el consumo…</p>
                     )}
+                    {history[selected.id]?.length > 0 && <HistoryChart points={history[selected.id]} />}
                   </dd>
                 </div>
                 <div className="port-note">

@@ -7,4 +7,5 @@ router.register('planteles', views.PlantelViewSet)
 router.register('switches', views.SwitchViewSet)
 urlpatterns = [path('auth/session/', views.session), path('auth/login/', views.sign_in),
                path('auth/logout/', views.sign_out), path('integrations/zabbix/', views.zabbix),
+               path('puertos/<int:pk>/historial/', views.port_history),
                path('', include(router.urls))]

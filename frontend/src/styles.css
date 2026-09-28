@@ -574,6 +574,7 @@ footer {
   font-size: 12px;
   margin: 8px 0 0;
 }
+.history-chart { margin-top: 16px; height: 220px; }
 .port-up .port-led {
   background: #2ed573;
   color: #2ed573;
