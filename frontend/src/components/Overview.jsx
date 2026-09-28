@@ -3,16 +3,46 @@ import { api } from "../api/client";
 
 const labels = { up: "activos", down: "inactivos", unknown: "sin lectura" };
 
+function formatUptime(value) {
+  if (!Number.isFinite(Number(value))) return "Sin lectura";
+  const days = Math.floor(Number(value) / 86400);
+  const hours = Math.floor((Number(value) % 86400) / 3600);
+  return `${days}d ${hours}h`;
+}
+
+function MetricHistory({ points }) {
+  const valid = points.filter((point) => Number.isFinite(Number(point.cpu)) || Number.isFinite(Number(point.memoria)));
+  if (!valid.length) return <small className="metric-history-empty">Sin histórico todavía</small>;
+  const values = valid.flatMap((point) => [Number(point.cpu), Number(point.memoria)]).filter(Number.isFinite);
+  const max = Math.max(100, ...values);
+  const line = (key) => valid.map((point, index) => {
+    const value = Number(point[key]);
+    return `${(index / Math.max(1, valid.length - 1)) * 100},${value === value ? 32 - (value / max) * 28 : 32}`;
+  }).join(" ");
+  return <svg className="metric-history" viewBox="0 0 100 34" role="img" aria-label="Histórico de CPU y memoria">
+    <polyline points={line("cpu")} fill="none" stroke="#00d4ff" strokeWidth="1.5" />
+    <polyline points={line("memoria")} fill="none" stroke="#9b7bff" strokeWidth="1.5" />
+  </svg>;
+}
+
 export default function Overview({ dashboard }) {
   const [devices, setDevices] = useState([]);
   const [portStats, setPortStats] = useState({});
   const [error, setError] = useState("");
   const [zabbix, setZabbix] = useState(null);
+  const [histories, setHistories] = useState({});
   async function refresh() {
     setError("");
     try {
       const switches = await api.list("switches");
       setDevices(switches);
+      const historyEntries = await Promise.all(
+        switches.map(async (device) => {
+          try { return [device.id, (await api.switchHistory(device.id)).points || []]; }
+          catch { return [device.id, []]; }
+        }),
+      );
+      setHistories(Object.fromEntries(historyEntries));
       const entries = await Promise.all(
         switches.map(async (device) => [device.id, await api.ports(device.id)]),
       );
@@ -135,6 +165,12 @@ export default function Overview({ dashboard }) {
                   {unknownPorts} {labels.unknown}
                 </span>
                 <span>{errors} errores</span>
+              </div>
+              <div className="device-metrics">
+                <span>CPU <strong>{device.cpu_5m ?? "—"}%</strong></span>
+                <span>RAM <strong>{device.memoria_usada_pct ?? "—"}%</strong></span>
+                <span>Uptime <strong>{formatUptime(device.uptime_segundos)}</strong></span>
+                <MetricHistory points={histories[device.id] || []} />
               </div>
             </article>
           );

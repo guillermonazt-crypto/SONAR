@@ -42,4 +42,5 @@ export const api = {
   ports: (id) => request(`switches/${id}/puertos/`),
   zabbix: () => request("integrations/zabbix/"),
   portHistory: (id) => request(`puertos/${id}/historial/`),
+  switchHistory: (id) => request(`switches/${id}/historial/`),
 };

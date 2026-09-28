@@ -62,7 +62,25 @@ OID_NETWORK = {
 
 OID_DEVICE = {
     'sys_descr': '1.3.6.1.2.1.1.1.0',
+    'sys_uptime': '1.3.6.1.2.1.1.3.0',
     'model': '1.3.6.1.2.1.47.1.1.1.1.13',
+}
+
+OID_MEMORY = {
+    'type': '1.3.6.1.2.1.25.2.3.1.2',
+    'descr': '1.3.6.1.2.1.25.2.3.1.3',
+    'units': '1.3.6.1.2.1.25.2.3.1.4',
+    'size': '1.3.6.1.2.1.25.2.3.1.5',
+    'used': '1.3.6.1.2.1.25.2.3.1.6',
+}
+
+OID_SENSOR = {
+    'name': '1.3.6.1.2.1.47.1.1.1.1.7',
+    'type': '1.3.6.1.2.1.99.1.1.1.1',
+    'scale': '1.3.6.1.2.1.99.1.1.1.2',
+    'precision': '1.3.6.1.2.1.99.1.1.1.3',
+    'value': '1.3.6.1.2.1.99.1.1.1.4',
+    'status': '1.3.6.1.2.1.99.1.1.1.5',
 }
 
 # Interfaces que corresponden a conectores del panel frontal.  Las interfaces
@@ -294,6 +312,85 @@ async def obtener_cpu(dispositivo: dict) -> dict | None:
     return cpu
 
 
+async def obtener_sistema(dispositivo: dict) -> dict:
+    """Obtiene uptime y memoria usando HOST-RESOURCES-MIB cuando existe."""
+    ip = dispositivo['hostname']
+    community = config.SNMP_COMMUNITY
+    try:
+        uptime_raw, descr, units, sizes, used = await asyncio.gather(
+            _get_oid(ip, community, OID_DEVICE['sys_uptime']),
+            _walk_oid(ip, community, OID_MEMORY['descr']),
+            _walk_oid(ip, community, OID_MEMORY['units']),
+            _walk_oid(ip, community, OID_MEMORY['size']),
+            _walk_oid(ip, community, OID_MEMORY['used']),
+        )
+    except Exception as error:
+        log.debug(f"[{dispositivo.get('name', ip)}] Memoria no disponible: {error}")
+        return {'uptime_segundos': None, 'memoria_total_bytes': None,
+                'memoria_usada_bytes': None, 'memoria_usada_pct': None}
+    candidates = []
+    for index, description in descr.items():
+        label = str(description).lower()
+        if any(word in label for word in ('memory', 'memoria', 'ram', 'physical')) and not any(word in label for word in ('flash', 'disk', 'storage')):
+            total = (_safe_int(units.get(index), 1) or 1) * (_safe_int(sizes.get(index), 0) or 0)
+            occupied = (_safe_int(units.get(index), 1) or 1) * (_safe_int(used.get(index), 0) or 0)
+            if total > 0:
+                candidates.append((total, occupied))
+    total_bytes, used_bytes = max(candidates, default=(None, None))
+    return {
+        'uptime_segundos': _safe_int(uptime_raw),
+        'memoria_total_bytes': total_bytes,
+        'memoria_usada_bytes': used_bytes,
+        'memoria_usada_pct': round(used_bytes * 100 / total_bytes, 2) if total_bytes and used_bytes is not None else None,
+    }
+
+
+async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict]:
+    """Lee sensores DOM ópticos publicados por ENTITY-SENSOR-MIB.
+
+    Muchos equipos no exponen DOM por SNMP; en ese caso devuelve una lista
+    vacía y no inventa valores.
+    """
+    ip = dispositivo['hostname']
+    community = config.SNMP_COMMUNITY
+    try:
+        names, types, scales, precisions, values, statuses = await asyncio.gather(
+            *(_walk_oid_rows(ip, community, oid) for oid in OID_SENSOR.values())
+        )
+    except Exception as error:
+        log.debug(f"[{dispositivo.get('name', ip)}] Sensores ópticos no disponibles: {error}")
+        return []
+    name_by_index = {suffix[-1]: str(value) for suffix, value in names if suffix}
+    scale_by_index = {suffix[-1]: _safe_int(str(value), 0) or 0 for suffix, value in scales if suffix}
+    precision_by_index = {suffix[-1]: _safe_int(str(value), 0) or 0 for suffix, value in precisions if suffix}
+    status_by_index = {suffix[-1]: _safe_int(str(value)) for suffix, value in statuses if suffix}
+    sensor_values = {}
+    for suffix, value in values:
+        if not suffix:
+            continue
+        index = suffix[-1]
+        raw = _safe_int(str(value))
+        if raw is None:
+            continue
+        sensor_values[index] = raw * (10 ** scale_by_index.get(index, 0)) / (10 ** precision_by_index.get(index, 0))
+    result = {}
+    for index, value in sensor_values.items():
+        label = name_by_index.get(index, '').lower()
+        match = next((item for item in interfaces if item['nombre'].lower() in label or label in item['nombre'].lower()), None)
+        if not match:
+            continue
+        slot = result.setdefault(match['nombre'], {'interfaz': match['nombre'], 'rx_dbm': None, 'tx_dbm': None, 'temp_c': None, 'estado': 'ok'})
+        if any(word in label for word in ('receive', ' rx', 'rx power', 'optical rx')):
+            slot['rx_dbm'] = round(value, 3)
+        elif any(word in label for word in ('transmit', ' tx', 'tx power', 'optical tx')):
+            slot['tx_dbm'] = round(value, 3)
+        elif any(word in label for word in ('temperature', 'temp')):
+            slot['temp_c'] = round(value, 2)
+        if status_by_index.get(index) not in (None, 1):
+            slot['estado'] = 'alerta'
+    return [item for item in result.values() if item['rx_dbm'] is not None or item['tx_dbm'] is not None or item['temp_c'] is not None]
+
+
 async def obtener_identidad(dispositivo: dict) -> dict:
     """Obtiene el modelo físico y la versión IOS-XE del equipo."""
     ip = dispositivo['hostname']
@@ -387,6 +484,8 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
 
         red = await obtener_red_interfaces(dispositivo)
         identidad = await obtener_identidad(dispositivo)
+        sistema = await obtener_sistema(dispositivo)
+        transceptores = await obtener_optica(dispositivo, interfaces)
         for interface in interfaces:
             interface.update(red.get(interface['indice'], {}))
 
@@ -400,7 +499,8 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
             'cpu_1m':        cpu['cpu_1m'],
             'cpu_5m':        cpu['cpu_5m'],
             'interfaces':    interfaces,
-            'transceptores': [],  # Fase siguiente
+            'transceptores': transceptores,
+            **sistema,
             **identidad,
         }
 

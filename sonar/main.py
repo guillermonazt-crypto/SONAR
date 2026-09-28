@@ -41,6 +41,7 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
             return False
 
         await asyncio.to_thread(writer.escribir_cpu, datos)
+        await asyncio.to_thread(writer.escribir_sistema, datos)
         await asyncio.to_thread(writer.escribir_interfaces, datos)
         await asyncio.to_thread(writer.escribir_optica, datos)
 

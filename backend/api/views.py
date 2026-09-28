@@ -95,6 +95,38 @@ def port_history(request, pk=None):
     except Exception as error:
         return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
 
+
+@require_GET
+def switch_history(request, pk=None):
+    """Serie de CPU y memoria para las gráficas nativas de SONAR."""
+    switch = Switch.objects.filter(pk=pk).first()
+    if switch is None:
+        return JsonResponse({'points': []}, status=404)
+    url = os.getenv('INFLUX_URL', 'http://localhost:8086')
+    token = os.getenv('INFLUX_TOKEN', '')
+    org = os.getenv('INFLUX_ORG', 'universidad')
+    bucket = os.getenv('INFLUX_BUCKET', 'red_universitaria')
+    flux = f'''from(bucket: "{bucket}")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r.device == "{switch.nombre}")
+  |> filter(fn: (r) => r._measurement == "cpu" or r._measurement == "sistema")
+  |> aggregateWindow(every: 15m, fn: last, createEmpty: false)
+  |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")'''
+    try:
+        with InfluxDBClient(url=url, token=token, org=org) as client:
+            rows = client.query_api().query(flux, org=org)
+        points = []
+        for table in rows:
+            for record in table.records:
+                values = record.values
+                points.append({'time': record.get_time().isoformat(),
+                               'cpu': values.get('cpu_5m'),
+                               'memoria': values.get('memoria_usada_pct'),
+                               'uptime': values.get('uptime_segundos')})
+        return JsonResponse({'points': points})
+    except Exception as error:
+        return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
+
 class InventoryViewSet(viewsets.ModelViewSet):
     permission_classes = [InventoryPermission]
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']

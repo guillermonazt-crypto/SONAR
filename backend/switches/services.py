@@ -9,12 +9,22 @@ def record_poll(switch_id, hostname, datos):
     if switch is None:
         return
     now = timezone.now()
+    previous_uptime = switch.uptime_segundos
+    current_uptime = datos.get('uptime_segundos') if datos else None
+    reboot_detected = (
+        previous_uptime is not None and current_uptime is not None
+        and current_uptime < previous_uptime
+    )
     Switch.objects.filter(pk=switch.pk).update(
         ultima_consulta=now, lectura_correcta=datos is not None,
-        **{field: datos.get(field) if datos else None for field in ('cpu_5s','cpu_1m','cpu_5m')})
+        **{field: datos.get(field) if datos else None for field in (
+            'cpu_5s','cpu_1m','cpu_5m','memoria_usada_pct','memoria_total_bytes',
+            'memoria_usada_bytes','uptime_segundos')})
     if datos:
         Switch.objects.filter(pk=switch.pk).update(
             **{field: datos[field] for field in ('modelo', 'firmware') if field in datos})
+        if reboot_detected:
+            Switch.objects.filter(pk=switch.pk).update(ultimo_reinicio=now)
     # Puertos no observados dejan de mostrar métricas antiguas como actuales.
     # Sólo invalidamos el estado operativo y los errores mientras llega la
     # nueva lectura. Conservamos octetos y velocidad anterior para calcular

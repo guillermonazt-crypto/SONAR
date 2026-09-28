@@ -431,9 +431,26 @@ footer {
   margin-top: 16px;
 }
 .port-detail {
-  margin-top: 18px;
-  border-top: 1px solid #4b5362;
-  padding-top: 16px;
+  width: min(980px, calc(100vw - 48px));
+  max-height: calc(100vh - 90px);
+  overflow: auto;
+  margin: 0;
+  padding: 22px;
+  background: #1a1d28;
+  border: 1px solid #3d4556;
+  border-radius: 8px;
+  box-shadow: 0 24px 80px #000d;
+}
+.port-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #05070caa;
+  backdrop-filter: blur(4px);
 }
 .port-detail h3 {
   margin: 0;
@@ -461,6 +478,8 @@ footer {
   overflow-wrap: anywhere;
 }
 @media (max-width: 650px) {
+  .port-detail-backdrop { padding: 10px; }
+  .port-detail { width: calc(100vw - 20px); max-height: calc(100vh - 40px); padding: 16px; }
   .port-detail dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -580,6 +599,21 @@ footer {
   background: #0f1117;
   padding: 4px;
   border-radius: 3px;
+}
+.device-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, auto) 130px;
+  gap: 8px 14px;
+  align-items: center;
+  color: #8d98aa;
+  font-size: 11px;
+}
+.device-metrics strong { color: #e0e0e0; font-variant-numeric: tabular-nums; }
+.metric-history { width: 130px; height: 38px; background: #10131b; border-radius: 4px; }
+.metric-history-empty { color: #667085; }
+@media (max-width: 900px) {
+  .device-metrics { grid-template-columns: repeat(3, auto); }
+  .metric-history { grid-column: 1 / -1; width: 100%; }
 }
 .traffic-chart {
   height: 180px;

@@ -70,6 +70,22 @@ class InfluxWriter:
                  f"1m={datos['cpu_1m']}% "
                  f"5m={datos['cpu_5m']}%")
 
+    def escribir_sistema(self, datos: dict) -> None:
+        """Guarda memoria y uptime; omite campos que el equipo no publique."""
+        fields = {
+            key: datos.get(key) for key in (
+                'memoria_usada_pct', 'memoria_total_bytes',
+                'memoria_usada_bytes', 'uptime_segundos')
+            if datos.get(key) is not None
+        }
+        if not fields:
+            return
+        point = Point("sistema").tag("device", datos["nombre"]).tag("role", datos["rol"]).tag("site", datos["sitio"])
+        for key, value in fields.items():
+            point.field(key, value)
+        point.time(datetime.now(timezone.utc), WritePrecision.S)
+        self.write_api.write(bucket=self.bucket, org=self.org, record=point)
+
     def escribir_interfaces(self, datos: dict) -> None:
         """
         Escribe los errores de cada interfaz del switch en InfluxDB.
@@ -111,9 +127,9 @@ class InfluxWriter:
                    la lista de transceptores con rx_dbm y tx_dbm
         """
         for tx in datos["transceptores"]:
-            # Calculo de atenuacion: diferencia entre lo que transmite
-            # y lo que recibe el otro extremo
-            atenuacion = round(abs(tx["tx_dbm"] - tx["rx_dbm"]), 2)
+            atenuacion = None
+            if tx.get("tx_dbm") is not None and tx.get("rx_dbm") is not None:
+                atenuacion = round(abs(tx["tx_dbm"] - tx["rx_dbm"]), 2)
 
             punto = (
                 Point("optica")
@@ -122,12 +138,12 @@ class InfluxWriter:
                 .tag("site",      datos["sitio"])
                 .tag("interface", tx["interfaz"])
                 .tag("status",    tx["estado"])
-                .field("rx_dbm",      tx["rx_dbm"])
-                .field("tx_dbm",      tx["tx_dbm"])
-                .field("temperatura", tx["temp_c"])
-                .field("atenuacion",  atenuacion)
                 .time(datetime.now(timezone.utc), WritePrecision.S)
             )
+            for field, value in (("rx_dbm", tx.get("rx_dbm")), ("tx_dbm", tx.get("tx_dbm")),
+                                 ("temperatura", tx.get("temp_c")), ("atenuacion", atenuacion)):
+                if value is not None:
+                    punto.field(field, value)
 
             self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
 

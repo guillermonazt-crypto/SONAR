@@ -18,8 +18,12 @@ class SwitchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Switch
         fields = ['id', 'nombre', 'hostname', 'modelo', 'firmware', 'rol', 'plantel', 'plantel_nombre', 'activo',
-                  'ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m']
-        read_only_fields = ['ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m', 'modelo', 'firmware']
+                  'ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m',
+                  'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
+                  'uptime_segundos', 'ultimo_reinicio']
+        read_only_fields = ['ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m',
+                            'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
+                            'uptime_segundos', 'ultimo_reinicio', 'modelo', 'firmware']
 
 class PuertoSerializer(serializers.ModelSerializer):
     class Meta:

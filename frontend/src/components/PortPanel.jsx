@@ -317,9 +317,13 @@ export default function PortPanel({ device, items, loading, onClose }) {
             </div>
           </div>
           {selected && (
-            <div className="port-detail" aria-live="polite">
+            <div className="port-detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
+            <section className="port-detail" role="dialog" aria-modal="true" aria-labelledby="port-detail-title" aria-live="polite">
               <div className="section-title">
-                <h3>{selected.nombre}</h3>
+                <div>
+                  <span className="eyebrow">DETALLE DEL PUERTO</span>
+                  <h3 id="port-detail-title">{selected.nombre}</h3>
+                </div>
                 <button type="button" onClick={() => setSelected(null)}>
                   Cerrar detalle
                 </button>
@@ -425,6 +429,7 @@ export default function PortPanel({ device, items, loading, onClose }) {
                   <dd>Los contadores SNMP son acumulativos. Compara una nueva lectura después de corregir o limpiar el contador para confirmar que el error dejó de aumentar.</dd>
                 </div>
               </dl>
+            </section>
             </div>
           )}
         </>

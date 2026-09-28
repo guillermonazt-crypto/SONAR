@@ -35,6 +35,11 @@ class Switch(models.Model):
     cpu_5s = models.IntegerField(null=True, blank=True)
     cpu_1m = models.IntegerField(null=True, blank=True)
     cpu_5m = models.IntegerField(null=True, blank=True)
+    memoria_usada_pct = models.FloatField(null=True, blank=True)
+    memoria_total_bytes = models.BigIntegerField(null=True, blank=True)
+    memoria_usada_bytes = models.BigIntegerField(null=True, blank=True)
+    uptime_segundos = models.BigIntegerField(null=True, blank=True)
+    ultimo_reinicio = models.DateTimeField(null=True, blank=True)
     modelo = models.CharField(max_length=100, null=True, blank=True)
     firmware = models.CharField(max_length=100, null=True, blank=True)
 
