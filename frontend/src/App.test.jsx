@@ -17,12 +17,14 @@ vi.mock("./api/client", () => ({
     save: vi.fn(),
     ports: vi.fn(),
     zabbix: vi.fn(),
+    portHistory: vi.fn(),
   },
 }));
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
   api.zabbix.mockResolvedValue({ configured: false, hosts: [], detail: "No configurado" });
+  api.portHistory.mockResolvedValue({ points: [] });
   api.list.mockImplementation((resource) =>
     Promise.resolve(
       resource === "switches"
