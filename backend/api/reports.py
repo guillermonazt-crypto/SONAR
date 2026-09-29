@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from switches.health import FLAP_CHANGES, assess, port_stats, reason_type, thresholds_by_role
+from switches.health import FLAP_CHANGES, POE_FAULT_STATES, assess, port_stats, reason_type, thresholds_by_role
 from switches.models import Alerta, EventoPuerto, Puerto, Switch
 
 
@@ -118,19 +118,54 @@ def puertos_saturados(params, now):
                           ('salida_bps', 'Salida bps')], filas=rows)
 
 
+# Consumo máximo por equipo según la norma (W): 802.3af y 802.3at (PoE+).
+POE_CLASSES = (('capacidad_af', 15.4), ('capacidad_at', 30.0))
+
+
 def poe(params, now):
-    powered = dict(Puerto.objects.filter(poe_estado='deliveringPower').values('switch').annotate(n=Count('id'))
-                   .values_list('switch', 'n'))
+    """Presupuesto, consumo y cuánto margen queda para conectar más equipos PoE."""
+    ports = {}
+    for row in (Puerto.objects.filter(es_fisico=True).exclude(poe_estado__isnull=True)
+                .values('switch', 'poe_estado', 'estado_operativo')):
+        counts = ports.setdefault(row['switch'], dict(poe=0, energizados=0, libres=0, falla=0))
+        counts['poe'] += 1
+        if row['poe_estado'] == 'deliveringPower':
+            counts['energizados'] += 1
+        elif row['poe_estado'] in POE_FAULT_STATES:
+            counts['falla'] += 1
+        elif row['estado_operativo'] != 'up':
+            counts['libres'] += 1
     rows = []
-    for s in Switch.objects.select_related('plantel').exclude(poe_presupuesto_w__isnull=True):
-        used = s.poe_consumo_w or 0
-        rows.append(dict(switch=s.nombre, switch_id=s.pk, plantel=s.plantel.nombre, presupuesto_w=s.poe_presupuesto_w,
-                         consumo_w=used, uso_pct=round(used * 100 / s.poe_presupuesto_w, 1) if s.poe_presupuesto_w else None,
-                         puertos_energizados=powered.get(s.pk, 0)))
-    rows.sort(key=lambda row: -(row['uso_pct'] or 0))
-    return dict(titulo='PoE por switch', descripcion='Presupuesto y consumo de energía por Ethernet (POWER-ETHERNET-MIB).',
+    switches = Switch.objects.select_related('plantel').filter(activo=True).filter(
+        Q(poe_presupuesto_w__isnull=False) | Q(pk__in=ports))
+    for s in switches:
+        counts = ports.get(s.pk, dict(poe=0, energizados=0, libres=0, falla=0))
+        budget, used = s.poe_presupuesto_w, s.poe_consumo_w or 0
+        free_w = round(max(0.0, budget - used), 1) if budget else None
+        capacity = {key: int(free_w // watts) if free_w is not None else None for key, watts in POE_CLASSES}
+        if not budget:
+            ready = 'Sin presupuesto publicado'
+        elif counts['falla']:
+            ready = 'Revisar puertos en falla'
+        elif not capacity['capacidad_af'] or not counts['libres']:
+            ready = 'Sin margen' if not capacity['capacidad_af'] else 'Sin puertos PoE libres'
+        else:
+            ready = 'Listo'
+        rows.append(dict(switch=s.nombre, switch_id=s.pk, plantel=s.plantel.nombre, presupuesto_w=budget,
+                         consumo_w=s.poe_consumo_w,
+                         uso_pct=round(used * 100 / budget, 1) if budget else None, disponible_w=free_w,
+                         puertos_poe=counts['poe'], puertos_energizados=counts['energizados'],
+                         puertos_libres=counts['libres'], puertos_falla=counts['falla'], **capacity, preparacion=ready))
+    rows.sort(key=lambda row: (row['preparacion'] == 'Listo', -(row['uso_pct'] or 0), row['switch']))
+    return dict(titulo='PoE por switch',
+                descripcion='Presupuesto, consumo y margen para nuevos equipos (POWER-ETHERNET-MIB). Capacidad = cuántos '
+                            'equipos más caben con el presupuesto restante: 802.3af hasta 15.4 W, PoE+ (802.3at) hasta 30 W. '
+                            'Puertos libres: PoE sin enlace ni falla.',
                 columnas=[('switch', 'Switch'), ('plantel', 'Plantel'), ('presupuesto_w', 'Presupuesto (W)'),
-                          ('consumo_w', 'Consumo (W)'), ('uso_pct', 'Uso %'), ('puertos_energizados', 'Puertos energizados')],
+                          ('consumo_w', 'Consumo (W)'), ('uso_pct', 'Uso %'), ('disponible_w', 'Disponible (W)'),
+                          ('puertos_energizados', 'Energizados'), ('puertos_libres', 'Libres PoE'),
+                          ('puertos_falla', 'En falla'), ('capacidad_af', 'Caben 802.3af'), ('capacidad_at', 'Caben PoE+'),
+                          ('preparacion', 'Preparación')],
                 filas=rows)
 
 

@@ -87,6 +87,12 @@ Las vistas se refrescan solas: el selector del encabezado permite cada 3 s (por
 defecto), 5 s, 30 s o desactivarlo. El refresco se pausa con la pestaña oculta y
 el switch, puerto, pestaña y carpetas abiertas se conservan al recargar la página.
 
+La tabla MAC se lee en todas las VLAN con puertos asignados, no sólo en la VLAN 1:
+en Cisco cada VLAN tiene su propia tabla y se consulta con la comunidad indexada
+`comunidad@vlan` (v2c) o el contexto `vlan-N` (v3; el usuario necesita acceso a esos
+contextos). `SNMP_MAX_VLANS` (32) limita cuántas por ciclo. Cada MAC queda en un solo
+puerto: el que menos MAC aprende (el de acceso), no el troncal por donde también pasa.
+
 Los datos de voz, CDP, VLAN y DHCP snooping se muestran sólo cuando el equipo los
 publica. Los OID específicos de un fabricante son enriquecimientos opcionales;
 estado, alias, errores y tráfico se obtienen con MIBs estándar.
@@ -116,6 +122,10 @@ El worker envía una alerta cuando un switch pasa a rojo y otra cuando se recupe
 con un cooldown (`ALERT_COOLDOWN_MINUTES`). Canales opcionales en `.env`: correo
 (`ALERT_EMAIL_TO` + `EMAIL_*`), Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
 y webhook de Teams/Slack/Google Chat (`ALERT_WEBHOOK_URL`).
+
+**PoE.** Un puerto PoE en falla pone el switch en atención. El reporte PoE muestra
+además el margen disponible (W), puertos PoE libres y cuántos equipos más caben
+(802.3af 15.4 W / PoE+ 30 W), con una columna "Preparación" para planear altas.
 
 **Alertas inteligentes.** Condición compuesta: si 3 o más puertos de un mismo switch
 tienen errores nuevos (o están inestables) a la vez, el switch pasa a rojo aunque cada

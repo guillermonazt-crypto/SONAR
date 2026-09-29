@@ -105,6 +105,12 @@ describe("Monitoring con refresco automático", () => {
     expect(screen.getByText(/Entregando energía · 6\.5 W/)).toBeInTheDocument();
   });
 
+  it("resalta un puerto PoE en falla", async () => {
+    api.ports.mockResolvedValue([{ ...port("down"), poe_estado: "fault", poe_mw: null }]);
+    render(<Monitoring focus={{ device, portId: 7 }} />);
+    expect(await screen.findByText("Falla")).toHaveClass("status-critical-text");
+  });
+
   it("abre directamente el puerto pedido desde el buscador", async () => {
     api.ports.mockResolvedValue([port("up")]);
     render(<Monitoring focus={{ device, portId: 7 }} />);

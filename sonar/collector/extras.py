@@ -202,6 +202,77 @@ async def hardware(walk):
     return {'temperatura_c': float(max(temperatures)) if temperatures else None, 'hardware': components}
 
 
+# BRIDGE-MIB. En Cisco la tabla MAC es por VLAN: fuera de la VLAN 1 sólo se ve
+# consultando el contexto de cada VLAN (comunidad@vlan en v2c, vlan-N en v3).
+OID_FDB_PORT = '1.3.6.1.2.1.17.4.3.1.2'      # dot1dTpFdbPort: MAC -> bridge port
+OID_BRIDGE_IF = '1.3.6.1.2.1.17.1.4.1.2'     # dot1dBasePortIfIndex: bridge port -> ifIndex
+OID_VTP_VLAN_STATE = '1.3.6.1.4.1.9.9.46.1.3.1.1.2'  # vtpVlanState: 1 = operativa
+RESERVED_VLANS = {1, 1002, 1003, 1004, 1005}
+
+
+def macs_por_interfaz(fdb_port, bridge_if):
+    """[(mac, ifIndex)] a partir de las filas FDB y la relación bridge port → ifIndex."""
+    bridge_to_if = {suffix[0]: _int(value) for suffix, value in bridge_if if suffix}
+    entries = []
+    for suffix, value in fdb_port:
+        if len(suffix) < 6:
+            continue
+        if_index = bridge_to_if.get(_int(value))
+        if if_index:
+            entries.append((tuple(suffix[-6:]), if_index))
+    return entries
+
+
+def asignar_macs(entries):
+    """{mac: ifIndex}: cada MAC en un solo puerto.
+
+    Una MAC aparece también en el troncal o uplink por el que se aprende en otras
+    VLAN; se queda en el puerto con menos MAC aprendidas (el de acceso).
+    """
+    load = {}
+    for mac, if_index in set(entries):
+        load[if_index] = load.get(if_index, 0) + 1
+    best = {}
+    for mac, if_index in sorted(set(entries)):
+        current = best.get(mac)
+        if current is None or load[if_index] < load[current]:
+            best[mac] = if_index
+    return best
+
+
+async def vlans_con_equipos(walk, port_vlans, limit):
+    """VLAN a consultar por contexto: las asignadas a puertos (datos y voz).
+
+    Si el agente no publica la VLAN por puerto se usan las operativas de VTP.
+    Nunca más de `limit`, para no alargar el ciclo en dominios VTP grandes.
+    """
+    vlans = {vlan for vlan in port_vlans if vlan and vlan not in RESERVED_VLANS and 1 < vlan < 4095}
+    if not vlans:
+        try:
+            rows = await walk(OID_VTP_VLAN_STATE)
+        except Exception as error:
+            log.debug(f"vtpVlanState no disponible: {error}")
+            rows = []
+        vlans = {suffix[-1] for suffix, value in rows
+                 if suffix and _int(value) == 1 and suffix[-1] not in RESERVED_VLANS}
+    return sorted(vlans)[:limit]
+
+
+async def tabla_mac(walk_vlan, port_vlans=(), limit=32):
+    """{mac(tuple de 6 bytes): ifIndex} de la VLAN por defecto y de cada VLAN con equipos.
+
+    `walk_vlan(oid, vlan=None)`: None es el contexto por defecto. Una VLAN que no
+    responde se omite sin perder las demás.
+    """
+    entries = macs_por_interfaz(await walk_vlan(OID_FDB_PORT), await walk_vlan(OID_BRIDGE_IF))
+    for vlan in await vlans_con_equipos(walk_vlan, port_vlans, limit):
+        try:
+            entries += macs_por_interfaz(await walk_vlan(OID_FDB_PORT, vlan), await walk_vlan(OID_BRIDGE_IF, vlan))
+        except Exception as error:
+            log.debug(f"Tabla MAC de la VLAN {vlan} no disponible: {error}")
+    return asignar_macs(entries)
+
+
 NO_NEIGHBOR = dict(vecino_nombre=None, vecino_puerto=None, vecino_plataforma=None, vecino_ip=None)
 NO_POE = dict(poe_estado=None, poe_mw=None)
 

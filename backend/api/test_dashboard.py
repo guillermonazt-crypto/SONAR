@@ -158,3 +158,47 @@ class TrendReportTests(TestCase):
             series, bucket = history.switch_trends(['SW'], 30)
         self.assertEqual(bucket, history.influx_settings()[3])
         self.assertEqual(len(series['SW']), 1)
+
+
+class PoeReadinessTests(TestCase):
+    def setUp(self):
+        from switches.models import Puerto
+        cache.clear()
+        self.reader = get_user_model().objects.create_user(username='reader', password='test-password', rol='lector')
+        plantel = Plantel.objects.create(nombre='Apan', division=Division.objects.create(nombre='Escuelas'))
+        now = timezone.now()
+        self.ready = Switch.objects.create(nombre='SW-READY', hostname='192.0.2.1', plantel=plantel,
+                                           poe_presupuesto_w=370, poe_consumo_w=300,
+                                           lectura_correcta=True, ultima_consulta=now)
+        self.fault = Switch.objects.create(nombre='SW-FAULT', hostname='192.0.2.2', plantel=plantel,
+                                           poe_presupuesto_w=370, poe_consumo_w=20,
+                                           lectura_correcta=True, ultima_consulta=now)
+        # Publica PoE por puerto pero no el presupuesto del chasis.
+        self.unknown = Switch.objects.create(nombre='SW-NOBUDGET', hostname='192.0.2.3', plantel=plantel)
+        Switch.objects.create(nombre='SW-NOPOE', hostname='192.0.2.4', plantel=plantel)
+        port = lambda switch, index, poe, state='down': Puerto.objects.create(
+            switch=switch, nombre=f'GigabitEthernet1/0/{index}', indice=index, poe_estado=poe, estado_operativo=state)
+        port(self.ready, 1, 'deliveringPower', 'up')
+        port(self.ready, 2, 'searching')
+        port(self.ready, 3, 'searching', 'up')  # con enlace: no está libre
+        port(self.fault, 1, 'fault')
+        port(self.unknown, 1, 'searching')
+
+    def test_poe_readiness_report(self):
+        self.client.force_login(self.reader)
+        rows = {row['switch']: row for row in self.client.get('/api/reportes/poe/').json()['filas']}
+        self.assertNotIn('SW-NOPOE', rows)
+        ready = rows['SW-READY']
+        self.assertEqual((ready['disponible_w'], ready['capacidad_af'], ready['capacidad_at']), (70.0, 4, 2))
+        self.assertEqual((ready['puertos_energizados'], ready['puertos_libres'], ready['preparacion']), (1, 1, 'Listo'))
+        self.assertEqual((rows['SW-FAULT']['puertos_falla'], rows['SW-FAULT']['preparacion']), (1, 'Revisar puertos en falla'))
+        self.assertEqual((rows['SW-NOBUDGET']['preparacion'], rows['SW-NOBUDGET']['capacidad_af']),
+                         ('Sin presupuesto publicado', None))
+
+    def test_poe_fault_is_a_health_warning(self):
+        self.client.force_login(self.reader)
+        by_name = {item['nombre']: item for item in self.client.get('/api/resumen/').json()['switches']}
+        self.assertEqual(by_name['SW-FAULT']['estado'], 'warning')
+        reason = [r for r in by_name['SW-FAULT']['motivos'] if r['tipo'] == 'poe'][0]
+        self.assertIn('1 puerto(s) PoE en falla', reason['text'])
+        self.assertEqual(by_name['SW-READY']['estado'], 'ok')

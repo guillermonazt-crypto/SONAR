@@ -422,7 +422,11 @@ export default function PortPanel({ device, items, loading, onClose }) {
                   <dd>
                     {selected.poe_estado ? (
                       <>
-                        {POE_TEXT[selected.poe_estado] || selected.poe_estado}
+                        {/fault/i.test(selected.poe_estado) ? (
+                          <span className="status-critical-text">{POE_TEXT[selected.poe_estado]}</span>
+                        ) : (
+                          POE_TEXT[selected.poe_estado] || selected.poe_estado
+                        )}
                         {selected.poe_mw != null && ` · ${(selected.poe_mw / 1000).toFixed(1)} W`}
                       </>
                     ) : (

@@ -23,16 +23,26 @@ import re
 
 from sonar.utils.logger import get_logger
 from sonar.utils import config
-from sonar.collector.extras import mentions_interface, obtener_extras
+from sonar.collector.extras import mentions_interface, obtener_extras, tabla_mac
 
 log = get_logger(__name__)
 
 
-def _auth(community: str):
-    """Credenciales SNMP según SNMP_VERSION: v3 (USM) o v2c (comunidad)."""
+def _auth(community: str, vlan: int | None = None):
+    """Credenciales SNMP según SNMP_VERSION: v3 (USM) o v2c (comunidad).
+
+    Con `vlan`, v2c usa la comunidad indexada de Cisco (comunidad@vlan) para
+    leer la tabla MAC de esa VLAN; en v3 la VLAN va en el contexto (_context).
+    """
     if config.SNMP_VERSION == '3':
         return UsmUserData(config.SNMP_V3_USER, **config.snmp_v3_keys())
-    return CommunityData(community, mpModel=1)
+    return CommunityData(f'{community}@{vlan}' if vlan else community, mpModel=1)
+
+
+def _context(vlan: int | None = None):
+    if vlan and config.SNMP_VERSION == '3':
+        return ContextData(contextName=f'vlan-{vlan}'.encode())
+    return ContextData()
 
 # ---------------------------------------------------------------------------
 # OIDs de Cisco IOS-XE
@@ -59,10 +69,6 @@ OID_NETWORK = {
     # ARP: ifIndex + IPv4 -> MAC and IPv4 address.
     'arp_mac': '1.3.6.1.2.1.4.22.1.2',
     'arp_ip': '1.3.6.1.2.1.4.22.1.3',
-    # Bridge FDB MAC -> bridge port; bridge port -> ifIndex.
-    'fdb_mac': '1.3.6.1.2.1.17.4.3.1.1',
-    'fdb_port': '1.3.6.1.2.1.17.4.3.1.2',
-    'bridge_if': '1.3.6.1.2.1.17.1.4.1.2',
     # Cisco access VLAN and CDP neighbor identity.
     'access_vlan': '1.3.6.1.4.1.9.9.68.1.2.2.1.2',
     'voice_vlan': '1.3.6.1.4.1.9.9.68.1.5.1.1.1',
@@ -181,15 +187,15 @@ async def _walk_oid(ip: str, community: str, oid: str) -> dict:
     return resultados
 
 
-async def _walk_oid_rows(ip: str, community: str, oid: str) -> list[tuple[list[int], object]]:
+async def _walk_oid_rows(ip: str, community: str, oid: str, vlan: int | None = None) -> list[tuple[list[int], object]]:
     """Conserva todo el índice de una tabla SNMP para correlacionar ARP/FDB/CDP."""
     rows = []
     async for error_indication, error_status, _error_index, var_binds in walk_cmd(
-        SnmpEngine(), _auth(community),
+        SnmpEngine(), _auth(community, vlan),
         await UdpTransportTarget.create((ip, config.SNMP_PORT),
                                         timeout=config.SNMP_TIMEOUT,
                                         retries=config.SNMP_RETRIES),
-        ContextData(), ObjectType(ObjectIdentity(oid)), lexicographicMode=False
+        _context(vlan), ObjectType(ObjectIdentity(oid)), lexicographicMode=False
     ):
         if error_indication or error_status:
             break
@@ -230,23 +236,18 @@ async def obtener_red_interfaces(dispositivo: dict) -> dict[int, dict]:
     ip = dispositivo['hostname']
     community = config.SNMP_COMMUNITY
     try:
-        arp_mac, arp_ip, fdb_mac, fdb_port, bridge_if, access_vlan, voice_vlan, cdp_device = await asyncio.gather(
+        arp_mac, arp_ip, access_vlan, voice_vlan, cdp_device = await asyncio.gather(
             *(_walk_oid_rows(ip, community, oid) for oid in OID_NETWORK.values())
         )
+        # MAC de todas las VLAN con equipos (no sólo la VLAN 1), una MAC por puerto.
+        mac_to_if = await tabla_mac(
+            lambda oid, vlan=None: _walk_oid_rows(ip, community, oid, vlan),
+            [_safe_int(str(value)) for _suffix, value in access_vlan + voice_vlan],
+            config.SNMP_MAX_VLANS)
     except Exception as error:
         log.warning(f"[{dispositivo.get('name', ip)}] Metadatos de red no disponibles: {error}")
         return {}
 
-    bridge_to_if = {suffix[0]: _safe_int(str(value)) for suffix, value in bridge_if if suffix}
-    mac_to_bridge = {}
-    for suffix, value in fdb_port:
-        if len(suffix) >= 6:
-            mac_to_bridge[tuple(suffix[-6:])] = _safe_int(str(value))
-    mac_to_if = {
-        mac: bridge_to_if.get(bridge)
-        for mac, bridge in mac_to_bridge.items()
-        if bridge is not None
-    }
     ip_by_mac = {}
     for suffix, value in arp_mac:
         if len(suffix) >= 5:

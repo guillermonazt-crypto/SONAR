@@ -18,6 +18,7 @@ FLAP_WINDOW = timedelta(hours=1)
 FLAP_CHANGES = 4
 SATURATION_PCT = 90
 POE_BUDGET_PCT = 90
+POE_FAULT_STATES = ('fault', 'otherFault')
 HARDWARE_LABEL = {'temperatura': 'Sensor de temperatura', 'ventilador': 'Ventilador', 'fuente': 'Fuente de poder'}
 LEVEL_RANK = {'ok': 0, 'warning': 1, 'critical': 2}
 DEFAULTS = dict(cpu_atencion=70, cpu_riesgo=90, memoria_atencion=80, memoria_riesgo=90, puertos_riesgo=3,
@@ -49,8 +50,10 @@ def port_stats(switch_ids, now=None):
                       danados=Count('id', filter=Q(estado='rojo')),
                       troncales=Count('id', filter=Q(es_trunk=True)),
                       voz=Count('id', filter=Q(voice_vlan__gt=0) & ~Q(voice_vlan=4096)),
-                      saturados=Count('id', filter=Q(uso_pct__gte=SATURATION_PCT))))
-    empty = dict(total=0, up=0, down=0, con_errores=0, danados=0, troncales=0, voz=0, saturados=0, inestables=0)
+                      saturados=Count('id', filter=Q(uso_pct__gte=SATURATION_PCT)),
+                      poe_falla=Count('id', filter=Q(poe_estado__in=POE_FAULT_STATES))))
+    empty = dict(total=0, up=0, down=0, con_errores=0, danados=0, troncales=0, voz=0, saturados=0, inestables=0,
+                 poe_falla=0)
     stats = {switch_id: dict(empty) for switch_id in switch_ids}
     for row in rows:
         stats[row.pop('switch_id')] = dict(row, inestables=0)
@@ -151,6 +154,9 @@ def assess(switch, stats, thresholds, now=None):
             value = f" ({component['valor']} °C)" if component.get('valor') is not None else ''
             level = _worst(level, component['estado'])
             reasons.append(_reason(component['estado'], 'hardware', f"{label} {component.get('nombre', '')} {state}{value}".replace('  ', ' ')))
+    if stats.get('poe_falla'):
+        level = _worst(level, 'warning')
+        reasons.append(_reason('warning', 'poe', f"{stats['poe_falla']} puerto(s) PoE en falla (el equipo conectado no recibe energía)"))
     if switch.poe_presupuesto_w and switch.poe_consumo_w is not None:
         used = switch.poe_consumo_w * 100 / switch.poe_presupuesto_w
         if used >= POE_BUDGET_PCT:

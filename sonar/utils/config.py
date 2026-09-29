@@ -48,6 +48,8 @@ SNMP_CONCURRENCY = int(os.getenv("SNMP_CONCURRENCY", "20"))
 SNMP_PORT      = int(os.getenv("SNMP_PORT",  "161"))
 SNMP_TIMEOUT   = int(os.getenv("SNMP_TIMEOUT", "2"))
 SNMP_RETRIES   = int(os.getenv("SNMP_RETRIES", "3"))
+# VLAN cuya tabla MAC se consulta por contexto (comunidad@vlan / vlan-N) en cada ciclo.
+SNMP_MAX_VLANS = int(os.getenv("SNMP_MAX_VLANS", "32"))
 
 
 
