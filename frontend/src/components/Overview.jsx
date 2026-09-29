@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Chart, CategoryScale, LinearScale, LineElement, PointElement, LineController, Tooltip, Legend } from "chart.js";
 import { api } from "../api/client";
 import { formatRate, formatUptime, timeAgo } from "../utils/format";
+import { useAutoRefresh } from "../utils/refresh";
 import { cssVar, useTheme } from "../utils/theme";
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, LineController, Tooltip, Legend);
@@ -21,6 +22,8 @@ const FILTERS = [
 ];
 const USAGE_SERIES = [["cpu", "CPU %", "accent"], ["memoria", "Memoria %", "violet"]];
 const TRAFFIC_SERIES = [["entrada_bps", "Entrada", "accent"], ["salida_bps", "Salida", "violet"]];
+
+const ZABBIX_MIN_MS = 30000;
 
 const rate = (value) => formatRate(value, { digits: 1, empty: "—" });
 const formatPercent = (value) => `${Math.round(value)}%`;
@@ -49,18 +52,21 @@ function lineOptions(format, max) {
   };
 }
 
+const seriesValues = (points, key) => points.map((point) => (Number.isFinite(point[key]) ? point[key] : null));
+
 function LineChart({ points, series, format, max, label }) {
   const canvas = useRef(null);
+  const chart = useRef(null);
   const theme = useTheme();
   useEffect(() => {
-    if (!canvas.current || !points.length) return undefined;
-    const chart = new Chart(canvas.current, {
+    if (!canvas.current) return undefined;
+    chart.current = new Chart(canvas.current, {
       type: "line",
       data: {
         labels: points.map((point) => hourLabel(point.time)),
         datasets: series.map(([key, name, color]) => ({
           label: name,
-          data: points.map((point) => (Number.isFinite(point[key]) ? point[key] : null)),
+          data: seriesValues(points, key),
           borderColor: cssVar(color),
           backgroundColor: cssVar(color),
           spanGaps: true,
@@ -68,8 +74,20 @@ function LineChart({ points, series, format, max, label }) {
       },
       options: lineOptions(format, max),
     });
-    return () => chart.destroy();
-  }, [points, series, format, max, theme]);
+    return () => {
+      chart.current.destroy();
+      chart.current = null;
+    };
+  }, [series, format, max, theme]);
+  // El refresco automático sólo cambia los datos: se actualiza la gráfica en sitio, sin recrearla.
+  useEffect(() => {
+    if (!chart.current?.canvas) return;
+    chart.current.data.labels = points.map((point) => hourLabel(point.time));
+    chart.current.data.datasets.forEach((dataset, index) => {
+      dataset.data = seriesValues(points, series[index][0]);
+    });
+    chart.current.update("none");
+  }, [points]);
   return <div className="device-chart"><canvas ref={canvas} role="img" aria-label={label} /></div>;
 }
 
@@ -167,13 +185,17 @@ export default function Overview({ onOpenPorts }) {
   const [error, setError] = useState("");
   const [zabbix, setZabbix] = useState(null);
   const [filter, setFilter] = useState("all");
-  async function refresh(force = false) {
-    setError("");
+  const zabbixAt = useRef(0);
+  async function refresh(force = false, auto = false) {
     try {
       setSummary(await api.summary(force));
+      setError("");
     } catch (exception) {
       setError(exception.message);
     }
+    // Zabbix no está cacheado en el backend: en automático se consulta como mucho cada 30 s.
+    if (auto && Date.now() - zabbixAt.current < ZABBIX_MIN_MS) return;
+    zabbixAt.current = Date.now();
     try {
       setZabbix(await api.zabbix());
     } catch {
@@ -183,9 +205,8 @@ export default function Overview({ onOpenPorts }) {
   }
   useEffect(() => {
     refresh();
-    const timer = setInterval(() => refresh(), 30000);
-    return () => clearInterval(timer);
   }, []);
+  useAutoRefresh(() => refresh(false, true));
 
   const devices = (summary?.switches || [])
     .slice()

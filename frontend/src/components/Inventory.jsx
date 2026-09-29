@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import AuditLog from "./AuditLog";
+import Backups from "./Backups";
+import Discovered from "./Discovered";
 import Sites from "./Sites";
 import SonarDataTable from "./DataTable";
+import { useAutoRefresh } from "../utils/refresh";
 const blank = {
   nombre: "",
   hostname: "",
@@ -18,9 +22,9 @@ export default function Inventory({ user }) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""),
+    [backupsFor, setBackupsFor] = useState(null);
   async function refresh() {
-    setError("");
     try {
       const [d, s] = await Promise.all([
         api.list("switches"),
@@ -28,6 +32,7 @@ export default function Inventory({ user }) {
       ]);
       setDevices(d);
       setSites(s);
+      setError("");
     } catch (e) {
       setError(e.message);
     } finally {
@@ -36,9 +41,9 @@ export default function Inventory({ user }) {
   }
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 30000);
-    return () => clearInterval(timer);
   }, []);
+  // Mientras se guarda no se refresca para no pisar la respuesta de la edición.
+  useAutoRefresh(refresh, !busy);
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -102,6 +107,7 @@ export default function Inventory({ user }) {
       cell: (d) => <div className="actions">
         <button onClick={() => { setEditing(d.id); setForm({ nombre: d.nombre, hostname: d.hostname, rol: d.rol, plantel: d.plantel, activo: d.activo }); }}>Editar</button>
         <button disabled={busy} onClick={() => toggle(d)}>{d.activo ? "Desactivar" : "Activar"}</button>
+        <button onClick={() => setBackupsFor(d)}>Respaldos</button>
       </div>,
     },
   ];
@@ -129,6 +135,17 @@ export default function Inventory({ user }) {
           {error}
         </p>
       )}
+      {user.can_edit && (
+        <Discovered
+          refreshKey={devices.length}
+          onAdd={(item) => {
+            // Prellena el formulario; el editor elige plantel y rol antes de guardar.
+            setEditing(null);
+            setForm({ ...blank, nombre: (item.nombre || "").split(".")[0].slice(0, 100), hostname: item.ip });
+            document.getElementById("inventory-form")?.scrollIntoView({ behavior: "smooth" });
+          }}
+        />
+      )}
       <div className={user.can_edit ? "grid" : "grid single"}>
         <section className="card">
           <div className="section-title">
@@ -152,7 +169,7 @@ export default function Inventory({ user }) {
         {user.can_edit && (
           <section className="card">
             <h2>{editing ? "Editar dispositivo" : "Agregar dispositivo"}</h2>
-            <form onSubmit={submit}>
+            <form id="inventory-form" onSubmit={submit}>
               <label>
                 Nombre del switch
                 <input
@@ -229,6 +246,8 @@ export default function Inventory({ user }) {
         <summary>Administrar planteles y divisiones</summary>
         <Sites user={user} />
       </details>
+      {user.can_edit && <AuditLog />}
+      {backupsFor && <Backups device={backupsFor} onClose={() => setBackupsFor(null)} />}
     </>
   );
 }

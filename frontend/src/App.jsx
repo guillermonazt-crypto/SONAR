@@ -1,20 +1,50 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { api } from "./api/client";
+import GlobalSearch from "./components/GlobalSearch";
 import Login from "./components/Login";
+import RefreshControl from "./components/RefreshControl";
+import { useAutoRefresh } from "./utils/refresh";
 import { setTheme, useTheme } from "./utils/theme";
+import { clearView, loadView, saveView } from "./utils/viewState";
+
+const TABS = ["monitoring", "inventory", "overview", "optics", "alerts", "reports"];
 
 // Cada pestaña se descarga al abrirla: chart.js y la tabla de inventario
 // no bloquean la carga inicial.
 const Inventory = lazy(() => import("./components/Inventory"));
 const Monitoring = lazy(() => import("./components/Monitoring"));
 const Overview = lazy(() => import("./components/Overview"));
+const Optics = lazy(() => import("./components/Optics"));
+const Alerts = lazy(() => import("./components/Alerts"));
+const Reports = lazy(() => import("./components/Reports"));
 export default function App() {
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
-    [tab, setTab] = useState("monitoring"),
-    [focusDevice, setFocusDevice] = useState(null);
+    [tab, setTab] = useState(() => (TABS.includes(loadView("tab")) ? loadView("tab") : "monitoring")),
+    [focus, setFocus] = useState(null),
+    [pendingAlerts, setPendingAlerts] = useState(0);
   const theme = useTheme();
+  // Alertas abiertas sin atender: se muestran junto a la pestaña Alertas.
+  async function loadAlerts() {
+    try {
+      const summary = await api.alertSummary();
+      setPendingAlerts(summary?.sin_reconocer || 0);
+    } catch {
+      // El contador es informativo; la pestaña muestra el error si lo hay.
+    }
+  }
+  useEffect(() => {
+    if (user) loadAlerts();
+  }, [user]);
+  useAutoRefresh(loadAlerts, Boolean(user));
+
+  // Abre un switch (y opcionalmente un puerto) en Monitoreo desde cualquier vista.
+  function openDevice(device, portId = null) {
+    setFocus({ device, portId });
+    setTab("monitoring");
+  }
+  useEffect(() => saveView("tab", tab), [tab]);
   async function connect() {
     setLoading(true);
     setError("");
@@ -35,6 +65,7 @@ export default function App() {
     try {
       await api.logout();
       setUser(null);
+      clearView();
       setTab("monitoring");
     } catch (e) {
       setError(e.message);
@@ -49,6 +80,7 @@ export default function App() {
           <p>Sistema de Observabilidad de Nodos y Análisis de Red</p>
         </div>
         <div className="header-tools">
+          {user && <RefreshControl />}
           <button
             className="theme-toggle"
             onClick={() => setTheme(theme === "light" ? "dark" : "light")}
@@ -83,6 +115,9 @@ export default function App() {
               ["monitoring", "Monitoreo"],
               ["inventory", "Inventario"],
               ["overview", "Resumen"],
+              ["optics", "Ópticas"],
+              ["alerts", "Alertas"],
+              ["reports", "Reportes"],
             ].map(([id, label]) => (
               <button
                 className={tab === id ? "active" : ""}
@@ -90,8 +125,12 @@ export default function App() {
                 onClick={() => setTab(id)}
               >
                 {label}
+                {id === "alerts" && pendingAlerts > 0 && (
+                  <span className="nav-count" aria-label={`${pendingAlerts} sin atender`}>{pendingAlerts}</span>
+                )}
               </button>
             ))}
+            <GlobalSearch onOpen={openDevice} />
             {user.is_staff && (
               <a href="/admin/" target="_blank" rel="noreferrer">
                 Administración Django ↗
@@ -100,9 +139,15 @@ export default function App() {
           </nav>
           <Suspense fallback={<p role="status">Cargando…</p>}>
           {tab === "monitoring" ? (
-            <Monitoring focusDevice={focusDevice} onFocusHandled={() => setFocusDevice(null)} />
+            <Monitoring focus={focus} onFocusHandled={() => setFocus(null)} />
           ) : tab === "overview" ? (
-            <Overview onOpenPorts={(device) => { setFocusDevice(device); setTab("monitoring"); }} />
+            <Overview onOpenPorts={(device) => openDevice(device)} />
+          ) : tab === "reports" ? (
+            <Reports onOpenPort={openDevice} />
+          ) : tab === "alerts" ? (
+            <Alerts user={user} onOpenDevice={(device) => openDevice(device)} />
+          ) : tab === "optics" ? (
+            <Optics onOpenPort={openDevice} />
           ) : tab === "inventory" ? (
             <Inventory user={user} />
           ) : (

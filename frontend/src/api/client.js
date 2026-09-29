@@ -1,4 +1,9 @@
 let csrfToken = "";
+// Última respuesta GET por ruta. Si el refresco trae exactamente lo mismo
+// (normalmente un 304 revalidado por ETag), se devuelve el mismo objeto y
+// React no vuelve a pintar la vista.
+const lastGet = new Map();
+
 export async function request(
   path,
   { method = "GET", data, form = false, signal } = {},
@@ -17,7 +22,20 @@ export async function request(
         : JSON.stringify(data)
       : undefined,
   });
-  const body = await response.json().catch(() => ({}));
+  const text = await response.text().catch(() => "");
+  if (response.ok && method === "GET" && lastGet.get(path)?.text === text) return lastGet.get(path).body;
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = {};
+  }
+  if (response.ok && method === "GET") {
+    lastGet.delete(path);
+    lastGet.set(path, { text, body });
+    // Las búsquedas crean rutas nuevas: se conservan sólo las 50 más recientes.
+    if (lastGet.size > 50) lastGet.delete(lastGet.keys().next().value);
+  }
   if (!response.ok)
     throw new Error(
       body.detail ||
@@ -44,4 +62,19 @@ export const api = {
   portHistory: (id) => request(`puertos/${id}/historial/`),
   switchHistory: (id) => request(`switches/${id}/historial/`),
   summary: (refresh = false) => request(`resumen/${refresh ? "?refresh=1" : ""}`),
+  optics: (refresh = false) => request(`opticas/${refresh ? "?refresh=1" : ""}`),
+  search: (query) => request(`buscar/?q=${encodeURIComponent(query)}`),
+  alerts: (open = false) => request(`alertas/${open ? "?estado=abiertas" : "?limit=100"}`),
+  alertSummary: () => request("alertas/resumen/"),
+  acknowledge: (id, nota) => request(`alertas/${id}/reconocer/`, { method: "POST", data: { nota } }),
+  maintenances: () => request("mantenimientos/?vigentes=1"),
+  saveMaintenance: (data) => request("mantenimientos/", { method: "POST", data }),
+  deleteMaintenance: (id) => request(`mantenimientos/${id}/`, { method: "DELETE" }),
+  auditLog: () => request("bitacora/?limit=200"),
+  report: (kind, query = "") => request(`reportes/${kind}/${query}`),
+  discovered: () => request("descubiertos/"),
+  ignoreDiscovered: (id) => request(`descubiertos/${id}/ignorar/`, { method: "POST" }),
+  backups: (switchId) => request(`switches/${switchId}/respaldos/`),
+  runBackup: (switchId) => request(`switches/${switchId}/respaldos/`, { method: "POST" }),
+  backupDetail: (id) => request(`respaldos/${id}/`),
 };

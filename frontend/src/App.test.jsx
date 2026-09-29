@@ -20,11 +20,17 @@ vi.mock("./api/client", () => ({
     portHistory: vi.fn(),
     switchHistory: vi.fn(),
     summary: vi.fn(),
+    search: vi.fn(),
+    optics: vi.fn(),
+    alertSummary: vi.fn(),
+    discovered: vi.fn(),
   },
 }));
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
+  api.alertSummary.mockResolvedValue({ abiertas: 0, sin_reconocer: 0 });
+  api.discovered.mockResolvedValue([]);
   api.zabbix.mockResolvedValue({ configured: false, hosts: [], detail: "No configurado" });
   api.portHistory.mockResolvedValue({ points: [] });
   api.switchHistory.mockResolvedValue({ points: [] });
@@ -42,6 +48,8 @@ beforeEach(() => {
               activo: true,
               cpu_5m: 0,
               ultima_consulta: null,
+              estado: "critical",
+              motivos: [{ level: "critical", text: "No responde a SNMP" }],
             },
           ]
         : [{ id: 1, nombre: "Lab", activo: true }],
@@ -63,7 +71,8 @@ describe("SONAR", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
     expect(await screen.findByText("SW-LAB")).toBeInTheDocument();
-    expect(screen.getByText("Sin respuesta")).toBeInTheDocument();
+    expect(screen.getByText("No responde a SNMP")).toBeInTheDocument();
+    expect(screen.getByText("En riesgo")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Guardar switch" }),
     ).not.toBeInTheDocument();
