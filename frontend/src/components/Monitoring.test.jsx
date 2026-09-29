@@ -141,6 +141,18 @@ describe("Monitoring con refresco automático", () => {
     expect(screen.getByText(/Entregando energía · 6\.5 W/)).toBeInTheDocument();
   });
 
+  it("marca en el puerto y en su detalle un AP o teléfono conectado", async () => {
+    api.ports.mockResolvedValue([
+      { ...port("up"), vecino_nombre: "AP-BIBLIOTECA", vecino_plataforma: "cisco AIR-AP2802I", vecino_tipo: "ap" },
+      { ...port("up"), id: 8, indice: 2, nombre: "GigabitEthernet1/0/2", vecino_nombre: "SEP001122334455", vecino_tipo: "telefono" },
+    ]);
+    render(<Monitoring focus={{ device, portId: 7 }} />);
+    expect(await screen.findByText("AP-BIBLIOTECA")).toBeInTheDocument();
+    expect(screen.getByLabelText("Access point")).toHaveTextContent("📶");
+    expect(screen.getByLabelText("Teléfono IP")).toHaveTextContent("☎");
+    expect(document.querySelector(".port-detail .neighbor-ap")).toHaveTextContent("📶 Access point");
+  });
+
   it("resalta un puerto PoE en falla", async () => {
     api.ports.mockResolvedValue([{ ...port("down"), poe_estado: "fault", poe_mw: null }]);
     render(<Monitoring focus={{ device, portId: 7 }} />);

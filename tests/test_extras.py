@@ -37,18 +37,68 @@ def subset(values, keys):
 
 
 class ExtrasTests(unittest.IsolatedAsyncioTestCase):
-    async def test_cdp_neighbors_skip_phones_and_decode_ip(self):
+    async def test_cdp_neighbors_classify_phones_and_decode_ip(self):
         walk = fake_walk({
             extras.OID_CDP['device']: [([50, 1], Octets(b'SW-DIST.uaeh.local')), ([10, 1], Octets(b'SEP001122334455'))],
-            extras.OID_CDP['port']: [([50, 1], Octets(b'TenGigabitEthernet1/1/4'))],
-            extras.OID_CDP['platform']: [([50, 1], Octets(b'cisco C9500-24Y4C'))],
+            extras.OID_CDP['port']: [([50, 1], Octets(b'TenGigabitEthernet1/1/4')), ([10, 1], Octets(b'Port 1'))],
+            extras.OID_CDP['platform']: [([50, 1], Octets(b'cisco C9500-24Y4C')), ([10, 1], Octets(b'Cisco IP Phone 8841'))],
             extras.OID_CDP['address']: [([50, 1], Octets(bytes([10, 0, 0, 2])))],
+            extras.OID_CDP['capabilities']: [([50, 1], Octets(bytes([0, 0, 0, 0x29]))), ([10, 1], Octets(bytes([0, 0, 0x04, 0x90])))],
         })
         per_port, _switch = await extras.obtener_extras(walk, INTERFACES)
         self.assertEqual(per_port[50], dict(vecino_nombre='SW-DIST.uaeh.local', vecino_puerto='TenGigabitEthernet1/1/4',
-                                            vecino_plataforma='cisco C9500-24Y4C', vecino_ip='10.0.0.2'))
-        # Sin vecino (o sólo un teléfono): se limpia el vecino anterior.
-        self.assertIsNone(per_port[10]['vecino_nombre'])
+                                            vecino_plataforma='cisco C9500-24Y4C', vecino_ip='10.0.0.2',
+                                            vecino_tipo='switch'))
+        self.assertEqual(subset(per_port[10], ['vecino_nombre', 'vecino_tipo']),
+                         dict(vecino_nombre='SEP001122334455', vecino_tipo='telefono'))
+        # Sin vecino: se limpia el vecino anterior.
+        self.assertIsNone(per_port[11]['vecino_nombre'])
+
+    async def test_cdp_access_point_by_platform(self):
+        walk = fake_walk({
+            extras.OID_CDP['device']: [([11, 3], Octets(b'AP-BIBLIOTECA'))],
+            extras.OID_CDP['platform']: [([11, 3], Octets(b'cisco AIR-AP2802I-A-K9'))],
+            extras.OID_CDP['capabilities']: [([11, 3], Octets(bytes([0, 0, 0, 0x02])))],
+        })
+        per_port, _switch = await extras.obtener_extras(walk, INTERFACES)
+        self.assertEqual(per_port[11]['vecino_tipo'], 'ap')
+
+    async def test_lldp_neighbors_fill_ports_without_cdp(self):
+        walk = fake_walk({
+            extras.OID_CDP['device']: [([50, 1], Octets(b'SW-DIST'))],
+            extras.OID_LLDP['name']: [([0, 7, 1], Octets(b'yealink-t46')), ([0, 8, 2], Octets(b'ap-lab')),
+                                      ([0, 9, 3], Octets(b'SW-DIST'))],
+            extras.OID_LLDP['descr']: [([0, 8, 2], Octets(b'Aruba AP-515\nArubaOS 8.10'))],
+            # telephone = bit 5 (0x04 en el primer byte); wlanAccessPoint = bit 3 (0x10).
+            extras.OID_LLDP['capabilities']: [([0, 7, 1], Octets(bytes([0x04, 0]))), ([0, 8, 2], Octets(bytes([0x10, 0])))],
+            extras.OID_LLDP['port']: [([0, 7, 1], Octets(b'WAN PORT'))],
+            extras.OID_LLDP_LOCAL_PORT['id']: [([7], Octets(b'Gi1/0/1')), ([8], Octets(b'Gi1/0/10')),
+                                               ([9], Octets(b'Te1/1/1'))],
+            extras.OID_LLDP_MAN_ADDR: [([0, 7, 1, 1, 4, 10, 1, 2, 3], 2)],
+        })
+        per_port, _switch = await extras.obtener_extras(walk, INTERFACES)
+        self.assertEqual(per_port[10], dict(vecino_nombre='yealink-t46', vecino_puerto='WAN PORT', vecino_plataforma=None,
+                                            vecino_ip='10.1.2.3', vecino_tipo='telefono'))
+        self.assertEqual(subset(per_port[11], ['vecino_nombre', 'vecino_plataforma', 'vecino_tipo']),
+                         dict(vecino_nombre='ap-lab', vecino_plataforma='Aruba AP-515', vecino_tipo='ap'))
+        # En Te1/1/1 CDP y LLDP ven al mismo equipo: gana CDP.
+        self.assertEqual(per_port[50]['vecino_nombre'], 'SW-DIST')
+
+    async def test_cdp_failure_keeps_ports_lldp_did_not_see(self):
+        walk = fake_walk({
+            extras.OID_CDP['address']: TimeoutError('sin respuesta'),
+            extras.OID_LLDP['name']: [([0, 50, 1], Octets(b'SW-DIST'))],
+        })
+        per_port, _switch = await extras.obtener_extras(walk, INTERFACES)
+        self.assertNotIn('vecino_nombre', per_port[10])
+        self.assertEqual(per_port[50]['vecino_nombre'], 'SW-DIST')
+
+    def test_classify_neighbor(self):
+        self.assertEqual(extras.clasificar_vecino('SEP0011AABBCCDD'), 'telefono')
+        self.assertEqual(extras.clasificar_vecino('ap1', 'cisco C9120AXI-B'), 'ap')
+        self.assertEqual(extras.clasificar_vecino('sw', 'cisco C9300-24P', cdp_caps=0x28), 'switch')
+        self.assertEqual(extras.clasificar_vecino('wlc', 'cisco C9800-40-K9', cdp_caps=0x01), 'router')
+        self.assertEqual(extras.clasificar_vecino('pc'), 'otro')
 
     async def test_cdp_failure_keeps_previous_neighbors(self):
         walk = fake_walk({extras.OID_CDP['address']: TimeoutError('sin respuesta')})
@@ -110,7 +160,8 @@ class ExtrasTests(unittest.IsolatedAsyncioTestCase):
     async def test_nothing_published(self):
         per_port, switch = await extras.obtener_extras(fake_walk({}), INTERFACES)
         self.assertEqual(switch, {})
-        self.assertEqual(per_port[10], dict(vecino_nombre=None, vecino_puerto=None, vecino_plataforma=None, vecino_ip=None))
+        self.assertEqual(per_port[10], dict(vecino_nombre=None, vecino_puerto=None, vecino_plataforma=None, vecino_ip=None,
+                                            vecino_tipo=None))
 
     def test_sensor_labels_use_short_names(self):
         self.assertTrue(extras.mentions_interface('Te1/1/1 Receive Power Sensor', 'TenGigabitEthernet1/1/1'))

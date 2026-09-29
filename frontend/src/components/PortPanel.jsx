@@ -4,6 +4,8 @@ import { loadView, saveView } from "../utils/viewState";
 import { Chart, CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend } from "chart.js";
 import { api } from "../api/client";
 import { formatBytes, formatRate, timeAgo } from "../utils/format";
+import { neighborType } from "../utils/neighbor";
+import NeighborTypeLabel from "./NeighborType";
 
 Chart.register(CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend);
 
@@ -279,18 +281,22 @@ export default function PortPanel({ device, items, loading, refreshing = false, 
     const localNumber = localPortNumber(port.nombre, port.indice);
     const inputTraffic = Number(port.octetos_entrada) || 0;
     const outputTraffic = Number(port.octetos_salida) || 0;
+    // Sólo AP y teléfono llevan marca en el puerto: son los equipos finales que interesa ubicar.
+    const endpoint = ["ap", "telefono"].includes(port.vecino_tipo) ? neighborType(port.vecino_tipo) : null;
+    const neighbor = port.vecino_nombre ? ` · → ${neighborType(port.vecino_tipo)?.icon ? `${neighborType(port.vecino_tipo).icon} ` : ""}${port.vecino_nombre}` : "";
     return (
       <button
         type="button"
         className={`physical-port port-${state}${voice ? " port-voice" : ""}${trunk ? " port-trunk" : ""}${damaged ? " port-damaged" : ""}`}
         key={port.id}
-        data-tooltip={`${port.nombre}${port.descripcion ? ` · ${port.descripcion}` : ""} · ${statusText[state]}${trunk ? " · TRUNK" : ""}${voice ? ` · Voice VLAN ${port.voice_vlan}` : ""}${damaged ? " · DAÑADO" : ""}${port.vecino_nombre ? ` · → ${port.vecino_nombre}` : ""}${port.uso_pct != null ? ` · ${Math.round(port.uso_pct)}% uso` : ""} · ${errors} errores`}
+        data-tooltip={`${port.nombre}${port.descripcion ? ` · ${port.descripcion}` : ""} · ${statusText[state]}${trunk ? " · TRUNK" : ""}${voice ? ` · Voice VLAN ${port.voice_vlan}` : ""}${damaged ? " · DAÑADO" : ""}${neighbor}${port.uso_pct != null ? ` · ${Math.round(port.uso_pct)}% uso` : ""} · ${errors} errores`}
         aria-label={`${port.nombre}: ${statusText[state]}; ${errors} errores`}
         onClick={() => openPort(port)}
       >
         <span className="port-led status-led" aria-hidden="true" />
         {voice && <span className="port-led voice-led" aria-label="Voice VLAN" />}
         {damaged && <span className="port-led damage-led" aria-label="Puerto dañado" />}
+        {endpoint && <span className={`port-endpoint endpoint-${port.vecino_tipo}`} aria-label={endpoint.label}>{endpoint.icon}</span>}
         <span>{localNumber}</span>
         <span className="traffic-meter" aria-hidden="true">
           <i className="traffic-in" style={{ width: `${(inputTraffic / maxTraffic) * 100}%` }} />
@@ -408,6 +414,8 @@ export default function PortPanel({ device, items, loading, refreshing = false, 
                 <i className="legend-dot dot-damaged" />
                 Amarillo limón · Daño/error
               </span>
+              <span>📶 Access point</span>
+              <span>☎ Teléfono IP</span>
             </div>
           </div>
           {selected && (
@@ -432,18 +440,21 @@ export default function PortPanel({ device, items, loading, refreshing = false, 
                   <dd>{selected.es_trunk ? "Troncal (trunk)" : "Acceso"}</dd>
                 </div>
                 <div>
-                  <dt>Vecino (CDP)</dt>
+                  <dt>Vecino (CDP/LLDP)</dt>
                   <dd>
                     {selected.vecino_nombre ? (
                       <>
                         <strong>{selected.vecino_nombre}</strong>
                         {selected.vecino_puerto && ` · ${selected.vecino_puerto}`}
+                        {selected.vecino_tipo && (
+                          <small className="detail-note"><NeighborTypeLabel kind={selected.vecino_tipo} /></small>
+                        )}
                         <small className="detail-note">
                           {[selected.vecino_plataforma, selected.vecino_ip].filter(Boolean).join(" · ")}
                         </small>
                       </>
                     ) : (
-                      "Sin vecino CDP"
+                      "Sin vecino CDP/LLDP"
                     )}
                   </dd>
                 </div>

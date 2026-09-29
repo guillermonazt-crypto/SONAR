@@ -8,7 +8,7 @@ from .models import EventoPuerto, Switch, Puerto
 ERROR_FIELDS = ('errores_entrada', 'errores_salida', 'errores_crc')
 OPTIONAL_FIELDS = ('es_trunk', 'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp', 'vlan', 'voice_vlan',
                    'octetos_entrada', 'octetos_salida', 'vecino_nombre', 'vecino_puerto',
-                   'vecino_plataforma', 'vecino_ip', 'velocidad_mbps', 'poe_estado', 'poe_mw')
+                   'vecino_plataforma', 'vecino_ip', 'vecino_tipo', 'velocidad_mbps', 'poe_estado', 'poe_mw')
 UPDATE_FIELDS = ['nombre', 'descripcion', 'estado_operativo', *ERROR_FIELDS, 'errores_nuevos',
                  'ultimo_error', 'es_fisico', 'actualizado', *OPTIONAL_FIELDS,
                  'bps_entrada', 'bps_salida', 'uso_pct', 'ultimo_cambio', 'ultimo_activo']

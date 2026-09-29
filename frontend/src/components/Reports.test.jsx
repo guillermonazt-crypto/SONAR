@@ -43,6 +43,26 @@ describe("Reports", () => {
     expect(map.querySelectorAll("circle.external")).toHaveLength(1);
   });
 
+  it("marca APs y teléfonos: ícono en el mapa, teléfonos fuera del dibujo y columna Tipo", async () => {
+    api.report.mockImplementation((kind, query) => Promise.resolve(report(kind,
+      [{ clave: "switch", titulo: "Switch" }, { clave: "tipo_equipo", titulo: "Tipo" }, { clave: "vecino", titulo: "Vecino" }], [
+        { switch: "SW-CORE", vecino: "AP-01", vecino_tipo: "ap", tipo_equipo: "Access point", en_inventario: "No" },
+        { switch: "SW-CORE", vecino: "SEP001122334455", vecino_tipo: "telefono", tipo_equipo: "Teléfono IP", en_inventario: "No" },
+      ], `${kind} ${query}`)));
+    render(<Reports />);
+    fireEvent.click(screen.getByRole("button", { name: "Topología" }));
+    const map = await screen.findByRole("img", { name: "Mapa de enlaces CDP" });
+    expect(map.querySelectorAll("circle")).toHaveLength(2);
+    expect(map.querySelector("[aria-label='Access point']")).toHaveTextContent("📶");
+    expect(screen.getByText(/1 teléfono IP conectado/)).toBeInTheDocument();
+    expect(screen.getByText("Access point").closest(".neighbor-type")).toHaveTextContent("📶 Access point");
+    expect(screen.getByText("Teléfono IP").closest(".neighbor-type")).toHaveTextContent("☎ Teléfono IP");
+    fireEvent.click(screen.getByRole("button", { name: "APs y teléfonos" }));
+    await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo="));
+    fireEvent.change(screen.getByLabelText("Equipo"), { target: { value: "ap" } });
+    await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo=ap"));
+  });
+
   it("muestra tendencias de 7 o 30 días y avisa si InfluxDB no respondió", async () => {
     const serie = [
       { dia: "2026-09-28", cpu: 20, memoria: 50, entrada_bps: 1000, salida_bps: 500, alertas: 2 },

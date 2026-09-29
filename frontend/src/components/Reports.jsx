@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { api } from "../api/client";
 import { formatRate } from "../utils/format";
+import { neighborType } from "../utils/neighbor";
+import NeighborTypeLabel from "./NeighborType";
 import SonarDataTable from "./DataTable";
 import LineChart from "./LineChart";
 import { useViewState } from "../utils/viewState";
@@ -19,6 +21,7 @@ const REPORTS = [
   ["hardware", "Hardware"],
   ["opticas", "Ópticas"],
   ["topologia", "Topología"],
+  ["aps-telefonos", "APs y teléfonos", { key: "equipo", label: "Equipo", value: "", options: [["", "Todos"], ["ap", "Access points"], ["telefono", "Teléfonos"]] }],
 ];
 const LEVEL_TEXT = { ok: "Normal", warning: "Atención", critical: "En riesgo" };
 
@@ -68,15 +71,17 @@ function TrendCharts({ serie }) {
   );
 }
 
-/** Mapa simple de enlaces CDP: nodos en círculo y una línea por enlace. */
-function TopologyMap({ rows }) {
-  const { nodes, links } = useMemo(() => {
+/** Mapa simple de enlaces CDP/LLDP: nodos en círculo y una línea por enlace.
+ *  Los teléfonos no se dibujan (serían cientos de nodos); se cuentan aparte. */
+function TopologyMap({ rows: allRows }) {
+  const { nodes, links, phones } = useMemo(() => {
+    const rows = allRows.filter((row) => row.vecino_tipo !== "telefono");
     const names = new Map();
     const label = (row, side) => (side === "local" ? row.switch : row.vecino.split(".")[0]);
     rows.forEach((row) => {
-      names.set(row.switch, { name: row.switch, known: true });
+      if (!names.has(row.switch)) names.set(row.switch, { name: row.switch, known: true, kind: "switch" });
       const neighbor = label(row, "neighbor");
-      if (!names.has(neighbor)) names.set(neighbor, { name: neighbor, known: row.en_inventario === "Sí" });
+      if (!names.has(neighbor)) names.set(neighbor, { name: neighbor, known: row.en_inventario === "Sí", kind: row.vecino_tipo });
     });
     const list = [...names.values()];
     const radius = Math.max(120, list.length * 14);
@@ -97,21 +102,31 @@ function TopologyMap({ rows }) {
       seen.add(key);
       edges.push({ from: byName.get(a), to: byName.get(b), key });
     });
-    return { nodes: { list, size }, links: edges };
-  }, [rows]);
-  if (!nodes.list.length) return null;
+    return { nodes: { list, size }, links: edges, phones: allRows.length - rows.length };
+  }, [allRows]);
+  if (!nodes.list.length && !phones) return null;
   return (
-    <svg className="topology-map" viewBox={`0 0 ${nodes.size} ${nodes.size}`} role="img" aria-label="Mapa de enlaces CDP">
+    <>
+    {nodes.list.length > 0 && <svg className="topology-map" viewBox={`0 0 ${nodes.size} ${nodes.size}`} role="img" aria-label="Mapa de enlaces CDP">
       {links.map((link) => (
         <line key={link.key} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className="topology-link" />
       ))}
       {nodes.list.map((node) => (
         <g key={node.name} transform={`translate(${node.x} ${node.y})`}>
           <circle r="9" className={node.known ? "topology-node" : "topology-node external"} />
+          {node.kind === "ap" && (
+            <text y="4" textAnchor="middle" className="topology-icon" aria-label="Access point">{neighborType("ap").icon}</text>
+          )}
           <text y="-14" textAnchor="middle" className="topology-label">{node.name}</text>
         </g>
       ))}
-    </svg>
+    </svg>}
+    {phones > 0 && (
+      <p className="report-count">
+        <NeighborTypeLabel kind="telefono" label={`${phones} teléfono${phones === 1 ? "" : "s"} IP conectado${phones === 1 ? "" : "s"}`} /> · no se dibujan en el mapa; ver «APs y teléfonos».
+      </p>
+    )}
+    </>
   );
 }
 
@@ -162,7 +177,9 @@ export default function Reports({ onOpenPort = () => {} }) {
     sortable: true,
     wrap: true,
     selector: (row) => row[column.clave] ?? "",
-    cell: (row) => cell(column.clave, row[column.clave]),
+    cell: (row) => (column.clave === "tipo_equipo"
+      ? <NeighborTypeLabel kind={row.vecino_tipo} label={row.tipo_equipo} />
+      : cell(column.clave, row[column.clave])),
   }));
   if (data?.filas?.some((row) => row.puerto_id)) {
     columns.push({

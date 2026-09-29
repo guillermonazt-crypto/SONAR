@@ -63,7 +63,7 @@ class PuertoSerializer(serializers.ModelSerializer):
                   'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp',
                   'vlan', 'voice_vlan', 'es_trunk', 'errores_entrada', 'errores_salida',
                   'errores_crc', 'errores_nuevos', 'ultimo_error', 'octetos_entrada', 'octetos_salida',
-                  'actualizado', 'vecino_nombre', 'vecino_puerto', 'vecino_plataforma', 'vecino_ip',
+                  'actualizado', 'vecino_nombre', 'vecino_puerto', 'vecino_plataforma', 'vecino_ip', 'vecino_tipo',
                   'velocidad_mbps', 'bps_entrada', 'bps_salida', 'uso_pct', 'ultimo_cambio', 'ultimo_activo',
                   'poe_estado', 'poe_mw']
 

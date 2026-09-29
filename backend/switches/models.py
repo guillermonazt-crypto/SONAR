@@ -104,11 +104,14 @@ class Puerto(models.Model):
     octetos_entrada = models.BigIntegerField(null=True, blank=True)
     octetos_salida  = models.BigIntegerField(null=True, blank=True)
     actualizado    = models.DateTimeField(auto_now=True)
-    # Vecino CDP (otro switch, AP, router); los teléfonos van en mac_telefono.
+    # Vecino CDP o LLDP (switch, router, AP o teléfono IP).
+    TIPOS_VECINO = [('switch', 'Switch'), ('router', 'Router'), ('ap', 'Access point'),
+                    ('telefono', 'Teléfono IP'), ('otro', 'Otro')]
     vecino_nombre = models.CharField(max_length=255, null=True, blank=True)
     vecino_puerto = models.CharField(max_length=100, null=True, blank=True)
     vecino_plataforma = models.CharField(max_length=255, null=True, blank=True)
     vecino_ip = models.GenericIPAddressField(null=True, blank=True)
+    vecino_tipo = models.CharField(max_length=10, choices=TIPOS_VECINO, null=True, blank=True)
     # Velocidad negociada (ifHighSpeed) y tasa calculada entre dos sondeos.
     velocidad_mbps = models.IntegerField(null=True, blank=True)
     bps_entrada = models.BigIntegerField(null=True, blank=True)

@@ -208,7 +208,13 @@ class ApiTests(TestCase):
         Puerto.objects.create(switch=core, nombre='Te1/1/1', indice=1, es_trunk=True, vecino_nombre='SW-ACC.uaeh.mx',
                               vecino_puerto='Gi1/1/1', vecino_ip='192.0.2.61', estado_operativo='up', uso_pct=95.5,
                               velocidad_mbps=10000)
-        Puerto.objects.create(switch=core, nombre='Te1/1/2', indice=2, vecino_nombre='AP-01', estado_operativo='up')
+        Puerto.objects.create(switch=core, nombre='Te1/1/2', indice=2, vecino_nombre='AP-01', estado_operativo='up',
+                              vecino_tipo='ap', vecino_plataforma='cisco AIR-AP2802I', vlan=30, poe_mw=15400)
+        Puerto.objects.create(switch=access, nombre='Gi1/0/3', indice=3, vecino_nombre='SEP001122334455',
+                              vecino_tipo='telefono', vlan=10, voice_vlan=110, vecino_ip='192.0.2.90',
+                              estado_operativo='up')
+        Puerto.objects.create(switch=access, nombre='Gi1/0/4', indice=4, mac_telefono='00:11:22:33:44:66',
+                              estado_operativo='up')
         unused = Puerto.objects.create(switch=access, nombre='Gi1/0/7', indice=7, estado_operativo='down',
                                        ultimo_activo=now - timedelta(days=45))
         Puerto.objects.create(switch=access, nombre='Gi1/0/8', indice=8, estado_operativo='down', ultimo_activo=now - timedelta(days=2))
@@ -234,6 +240,13 @@ class ApiTests(TestCase):
         self.assertEqual(get('hardware')['filas'][0]['estado'], 'critical')
         topology = {r['vecino']: r for r in get('topologia')['filas']}
         self.assertEqual((topology['SW-ACC.uaeh.mx']['vecino_id'], topology['AP-01']['vecino_id']), (access.pk, None))
+        self.assertEqual((topology['AP-01']['vecino_tipo'], topology['AP-01']['tipo_equipo']), ('ap', 'Access point'))
+        endpoints = {r['puerto']: r for r in get('aps-telefonos')['filas']}
+        self.assertEqual(set(endpoints), {'Te1/1/2', 'Gi1/0/3', 'Gi1/0/4'})
+        self.assertEqual((endpoints['Te1/1/2']['tipo_equipo'], endpoints['Te1/1/2']['poe_w']), ('Access point', 15.4))
+        self.assertEqual((endpoints['Gi1/0/3']['vecino_tipo'], endpoints['Gi1/0/3']['vlan']), ('telefono', 110))
+        self.assertEqual(endpoints['Gi1/0/4']['vecino'], '00:11:22:33:44:66')
+        self.assertEqual([r['puerto'] for r in get('aps-telefonos', equipo='ap')['filas']], ['Te1/1/2'])
         csv = self.client.get('/api/reportes/puertos-sin-uso/', dict(formato='csv'))
         self.assertIn('attachment; filename="sonar-puertos-sin-uso-', csv['Content-Disposition'])
         lines = csv.content.decode('utf-8-sig').splitlines()

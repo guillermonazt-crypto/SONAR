@@ -2,7 +2,7 @@
 #
 # Proyecto: SONAR - Sistema de Observabilidad de Nodos y Analisis de Red
 #
-# Datos adicionales por SNMP: vecinos CDP, velocidad y último cambio de cada
+# Datos adicionales por SNMP: vecinos CDP/LLDP (y su tipo), velocidad y último cambio de cada
 # puerto, PoE y salud física (temperatura, ventiladores, fuentes).
 #
 # Cada función recibe `walk(oid) -> [(sufijo, valor)]` para poder probarse sin
@@ -19,7 +19,29 @@ OID_CDP = {
     'device': '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
     'port': '1.3.6.1.4.1.9.9.23.1.2.1.1.7',
     'platform': '1.3.6.1.4.1.9.9.23.1.2.1.1.8',
+    'capabilities': '1.3.6.1.4.1.9.9.23.1.2.1.1.9',
 }
+# LLDP-MIB (IEEE 802.1AB): lldpRemTable se indexa por timeMark.localPortNum.remIndex.
+OID_LLDP = {
+    'name': '1.0.8802.1.1.2.1.4.1.1.9',          # lldpRemSysName
+    'port': '1.0.8802.1.1.2.1.4.1.1.7',          # lldpRemPortId
+    'port_descr': '1.0.8802.1.1.2.1.4.1.1.8',    # lldpRemPortDesc
+    'descr': '1.0.8802.1.1.2.1.4.1.1.10',        # lldpRemSysDesc
+    'capabilities': '1.0.8802.1.1.2.1.4.1.1.12', # lldpRemSysCapEnabled (BITS)
+}
+OID_LLDP_LOCAL_PORT = {
+    'id': '1.0.8802.1.1.2.1.3.7.1.3',            # lldpLocPortId (suele ser el nombre corto)
+    'descr': '1.0.8802.1.1.2.1.3.7.1.4',         # lldpLocPortDesc
+}
+OID_LLDP_MAN_ADDR = '1.0.8802.1.1.2.1.4.2.1.3'   # lldpRemManAddrIfSubtype; la IP va en el índice
+
+# cdpCacheCapabilities: máscara de 32 bits.
+CDP_ROUTER, CDP_SWITCH, CDP_PHONE = 0x01, 0x08, 0x80
+# LLDP SystemCapabilitiesMap (BITS: el bit 0 es el más significativo del primer byte).
+LLDP_BRIDGE, LLDP_WLAN_AP, LLDP_ROUTER, LLDP_TELEPHONE = 2, 3, 4, 5
+PHONE_PATTERN = re.compile(r'phone|\bCP-\d|telefon|\bSEP[0-9A-F]{12}\b', re.I)
+AP_PATTERN = re.compile(r'\bAIR-|aironet|access point|\bC91\d\dAX|\bCW91\d\d|\bAP\d{3,4}\b|\bMR\d\d\b|\bUAP\b', re.I)
+NEIGHBOR_TYPES = ('telefono', 'ap', 'switch', 'router', 'otro')
 OID_IF_EXTRA = {
     'high_speed': '1.3.6.1.2.1.31.1.1.1.15',   # Mbps
     'last_change': '1.3.6.1.2.1.2.2.1.9',      # TimeTicks (centésimas) desde el arranque
@@ -81,8 +103,45 @@ def mentions_interface(label, name):
     return False
 
 
+def _cdp_caps(value):
+    if value is None:
+        return None
+    if hasattr(value, 'asOctets'):
+        raw = bytes(value.asOctets())
+        return int.from_bytes(raw, 'big') if raw else None
+    return _int(value)
+
+
+def _lldp_bits(value):
+    """BITS de SNMP → conjunto de posiciones activas (0 = bit más alto del primer byte)."""
+    if value is None or not hasattr(value, 'asOctets'):
+        return None
+    raw = bytes(value.asOctets())
+    return {byte * 8 + bit for byte, octet in enumerate(raw) for bit in range(8) if octet & (0x80 >> bit)}
+
+
+def clasificar_vecino(nombre=None, plataforma=None, cdp_caps=None, lldp_caps=None):
+    """Tipo del equipo vecino: 'telefono', 'ap', 'switch', 'router' u 'otro'.
+
+    Las capacidades anunciadas mandan (bit Phone de CDP; telephone y
+    wlanAccessPoint de LLDP). CDP no tiene bit de AP, así que el modelo
+    (AIR-..., C9120AXI, "Cisco IP Phone 8841") decide cuando falta.
+    """
+    text = ' '.join(filter(None, (nombre, plataforma)))
+    lldp_caps = lldp_caps or set()
+    if (cdp_caps or 0) & CDP_PHONE or LLDP_TELEPHONE in lldp_caps or PHONE_PATTERN.search(text):
+        return 'telefono'
+    if LLDP_WLAN_AP in lldp_caps or AP_PATTERN.search(text):
+        return 'ap'
+    if (cdp_caps or 0) & CDP_SWITCH or LLDP_BRIDGE in lldp_caps:
+        return 'switch'
+    if (cdp_caps or 0) & CDP_ROUTER or LLDP_ROUTER in lldp_caps:
+        return 'router'
+    return 'otro'
+
+
 async def vecinos_cdp(walk):
-    """{ifIndex: {vecino_nombre, vecino_puerto, vecino_plataforma, vecino_ip}} sin teléfonos.
+    """{ifIndex: {vecino_nombre, vecino_puerto, vecino_plataforma, vecino_ip, vecino_tipo}}.
 
     None si la consulta falló (no se sabe nada); {} si no hay vecinos.
     """
@@ -96,16 +155,85 @@ async def vecinos_cdp(walk):
     result = {}
     for index, device in by_key['device'].items():
         name = _text(device)
-        # Los teléfonos IP (SEPxxxx) ya se muestran como MAC del teléfono.
-        if not name or name.upper().startswith('SEP'):
+        if not name:
             continue
         address = by_key['address'].get(index)
         raw = bytes(address.asOctets()) if hasattr(address, 'asOctets') else b''
+        platform = _text(by_key['platform'].get(index, '')) or None
+        kind = clasificar_vecino(name, platform, _cdp_caps(by_key['capabilities'].get(index)))
+        # Un puerto con teléfono y PC detrás puede ver varios vecinos: el que no es teléfono gana.
+        if index[0] in result and kind == 'telefono':
+            continue
         result[index[0]] = {
             'vecino_nombre': name,
             'vecino_puerto': _text(by_key['port'].get(index, '')) or None,
-            'vecino_plataforma': _text(by_key['platform'].get(index, '')) or None,
+            'vecino_plataforma': platform,
             'vecino_ip': '.'.join(str(byte) for byte in raw) if len(raw) == 4 else None,
+            'vecino_tipo': kind,
+        }
+    return result
+
+
+def _lldp_local_ports(local, interfaces):
+    """lldpLocPortNum → ifIndex, por nombre de interfaz (Gi1/0/1 o GigabitEthernet1/0/1).
+
+    Si el agente no publica la tabla local, se asume que el número es el ifIndex
+    (así lo hace IOS/IOS-XE).
+    """
+    by_name = {}
+    for item in interfaces:
+        by_name[item['nombre'].lower()] = item['indice']
+        by_name[short_name(item['nombre']).lower()] = item['indice']
+    mapping = {}
+    for key in ('id', 'descr'):
+        for suffix, value in local.get(key, []):
+            if suffix and suffix[-1] not in mapping:
+                index = by_name.get(_text(value).lower())
+                if index is not None:
+                    mapping[suffix[-1]] = index
+    known = {item['indice'] for item in interfaces}
+    return lambda port: mapping.get(port, port if port in known else None)
+
+
+async def vecinos_lldp(walk, interfaces):
+    """Vecinos LLDP con el mismo formato que vecinos_cdp (equipos no Cisco, teléfonos y APs de otras marcas)."""
+    try:
+        names = await walk(OID_LLDP['name'])
+        if not names:
+            return {}
+        rows = {key: await walk(oid) for key, oid in OID_LLDP.items() if key != 'name'}
+        rows['name'] = names
+        local = {key: await walk(oid) for key, oid in OID_LLDP_LOCAL_PORT.items()}
+        addresses = await walk(OID_LLDP_MAN_ADDR)
+    except Exception as error:
+        log.debug(f"LLDP no disponible: {error}")
+        return None
+    by_key = {key: {tuple(suffix[-3:]): value for suffix, value in values if len(suffix) >= 3}
+              for key, values in rows.items()}
+    ip_by_remote = {}
+    for suffix, _value in addresses:
+        # timeMark.localPort.remIndex.subtipo(1 = IPv4).largo(4).a.b.c.d
+        if len(suffix) >= 9 and suffix[3] == 1 and suffix[4] == 4:
+            ip_by_remote.setdefault(tuple(suffix[:3]), '.'.join(str(part) for part in suffix[5:9]))
+    to_if_index = _lldp_local_ports(local, interfaces)
+    result = {}
+    for index, value in by_key['name'].items():
+        if_index = to_if_index(index[1])
+        name = _text(value)
+        if if_index is None or not name:
+            continue
+        platform = _text(by_key['descr'].get(index, '')).splitlines()[0:1]
+        platform = platform[0][:255] if platform else None
+        kind = clasificar_vecino(name, platform, lldp_caps=_lldp_bits(by_key['capabilities'].get(index)))
+        if if_index in result and kind == 'telefono':
+            continue
+        port = _text(by_key['port_descr'].get(index, '')) or _text(by_key['port'].get(index, ''))
+        result[if_index] = {
+            'vecino_nombre': name,
+            'vecino_puerto': port or None,
+            'vecino_plataforma': platform or None,
+            'vecino_ip': ip_by_remote.get(index),
+            'vecino_tipo': kind,
         }
     return result
 
@@ -273,7 +401,7 @@ async def tabla_mac(walk_vlan, port_vlans=(), limit=32):
     return asignar_macs(entries)
 
 
-NO_NEIGHBOR = dict(vecino_nombre=None, vecino_puerto=None, vecino_plataforma=None, vecino_ip=None)
+NO_NEIGHBOR = dict(vecino_nombre=None, vecino_puerto=None, vecino_plataforma=None, vecino_ip=None, vecino_tipo=None)
 NO_POE = dict(poe_estado=None, poe_mw=None)
 
 
@@ -284,10 +412,15 @@ async def obtener_extras(walk, interfaces, uptime_ticks=None):
     desconectado o un equipo PoE retirado no se quedan guardados para siempre.
     """
     per_port = {item['indice']: {} for item in interfaces}
-    neighbors = await vecinos_cdp(walk)
+    cdp = await vecinos_cdp(walk)
+    lldp = await vecinos_lldp(walk, interfaces)
+    # CDP trae más detalle en equipo Cisco; LLDP cubre los puertos que CDP no ve.
+    # Si CDP falló, sólo se actualizan los puertos que LLDP sí vio.
+    neighbors = {**(lldp or {}), **(cdp or {})}
+    clear_missing = cdp is not None
     poe_ports, poe_switch = await poe(walk, interfaces)
     for index, values in per_port.items():
-        if neighbors is not None:
+        if clear_missing or index in neighbors:
             values.update(neighbors.get(index, NO_NEIGHBOR))
         if poe_switch:
             values.update(poe_ports.get(index, NO_POE))

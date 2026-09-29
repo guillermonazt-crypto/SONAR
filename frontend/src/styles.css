@@ -903,6 +903,40 @@ footer {
 .port-damaged {
   box-shadow: inset 0 0 0 2px var(--led-damaged);
 }
+.physical-port { position: relative; }
+/* Vista previa al pasar el cursor: estado, vecino, uso y errores del puerto. */
+.physical-port[data-tooltip]:hover::after,
+.physical-port[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: max-content;
+  max-width: 280px;
+  padding: 7px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px #0006;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+.port-endpoint {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--accent);
+  pointer-events: none;
+}
+.endpoint-telefono { color: var(--violet); }
 .port-damaged .damage-led {
   background: var(--led-damaged);
   color: var(--led-damaged);
@@ -1067,6 +1101,29 @@ footer {
 .status-critical-text { color: var(--critical); }
 .status-warning-text { color: var(--warning); }
 .device-card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+/* react-data-table-component v8 pinta el hover con sus propias variables
+   (--rdt-color-highlight, #eee por defecto y con !important): sin mapearlas,
+   la fila quedaba en blanco con el texto claro encima. Se enlazan al tema. */
+.rdt_table {
+  --rdt-color-bg: var(--surface-2);
+  --rdt-color-header-bg: var(--surface-3);
+  --rdt-color-footer-bg: var(--surface-3);
+  --rdt-color-text-primary: var(--text);
+  --rdt-color-text-secondary: var(--muted);
+  --rdt-color-divider: var(--border);
+  --rdt-color-highlight: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  --rdt-color-highlight-text: var(--text);
+  --rdt-color-selected: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  --rdt-color-selected-text: var(--text);
+  --rdt-color-striped: var(--surface-3);
+  --rdt-color-striped-text: var(--text);
+  --rdt-color-btn: var(--text-2);
+  --rdt-color-btn-hover: var(--accent-soft);
+  --rdt-color-primary: var(--accent);
+  --rdt-color-scheme: dark;
+}
+:root[data-theme="light"] .rdt_table { --rdt-color-scheme: light; }
+.rdt_rowHighlight:hover { box-shadow: inset 3px 0 0 var(--accent); }
 /* Selector "Rows per page" de la tabla: la regla global de select lo aplastaba. */
 .rdt_Pagination select {
   display: inline-block;
@@ -1139,6 +1196,11 @@ a.button {
 .topology-node { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
 .topology-node.external { fill: var(--faint); }
 .topology-label { fill: var(--text-2); font-size: 11px; }
+.topology-icon { font-size: 11px; pointer-events: none; }
+.neighbor-type { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.neighbor-type > span[aria-hidden] { width: 1.2em; text-align: center; }
+.neighbor-ap > span[aria-hidden] { color: var(--accent); }
+.neighbor-telefono > span[aria-hidden] { color: var(--violet, var(--accent)); }
 @media print {
   header, nav, footer, .no-print, .refresh-control, .global-search { display: none !important; }
   body, main, .card { background: #fff !important; color: #000 !important; box-shadow: none !important; }

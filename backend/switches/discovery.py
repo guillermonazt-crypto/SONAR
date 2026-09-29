@@ -10,10 +10,13 @@ def known_addresses():
 
 
 def cdp_candidates():
-    """Vecinos CDP con IP que no están en el inventario (switches, routers, APs)."""
+    """Vecinos CDP/LLDP con IP que no están en el inventario (switches, routers, APs).
+
+    Los teléfonos IP no se proponen: no se administran por SNMP y serían cientos.
+    """
     known = known_addresses()
     ports = (Puerto.objects.select_related('switch').exclude(vecino_ip__isnull=True)
-             .exclude(vecino_ip__in=known).order_by('switch__nombre', 'indice'))
+             .exclude(vecino_ip__in=known).exclude(vecino_tipo='telefono').order_by('switch__nombre', 'indice'))
     found = {}
     for port in ports:
         found.setdefault(port.vecino_ip, dict(

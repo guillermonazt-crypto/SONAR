@@ -194,12 +194,36 @@ def topologia(params, now):
         short = p.vecino_nombre.split('.')[0].split('(')[0].strip().lower()
         known = by_name.get(p.vecino_ip or '') or by_name.get(short)
         rows.append(_port_row(p, vecino=p.vecino_nombre, vecino_puerto=p.vecino_puerto or '',
+                              vecino_tipo=p.vecino_tipo or '', tipo_equipo=p.get_vecino_tipo_display() or '',
                               plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or '',
                               vecino_id=known.pk if known else None,
                               en_inventario='Sí' if known else 'No'))
-    return dict(titulo='Topología (vecinos CDP)', descripcion='Enlaces descubiertos por CDP entre equipos.',
-                columnas=[('switch', 'Switch'), ('puerto', 'Puerto'), ('vecino', 'Vecino'), ('vecino_puerto', 'Puerto del vecino'),
-                          ('plataforma', 'Plataforma'), ('vecino_ip', 'IP'), ('en_inventario', 'En inventario')], filas=rows)
+    return dict(titulo='Topología (vecinos CDP/LLDP)', descripcion='Enlaces descubiertos por CDP y LLDP entre equipos.',
+                columnas=[('switch', 'Switch'), ('puerto', 'Puerto'), ('tipo_equipo', 'Tipo'), ('vecino', 'Vecino'),
+                          ('vecino_puerto', 'Puerto del vecino'), ('plataforma', 'Plataforma'), ('vecino_ip', 'IP'),
+                          ('en_inventario', 'En inventario')], filas=rows)
+
+
+def aps_telefonos(params, now):
+    """Access points y teléfonos IP conectados, por CDP/LLDP o por la MAC del teléfono (SEPxxxx)."""
+    wanted = [kind for kind in ('ap', 'telefono') if params.get('equipo') in (None, '', kind)]
+    query = Q(vecino_tipo__in=wanted)
+    if 'telefono' in wanted:
+        query |= Q(vecino_tipo__isnull=True, mac_telefono__isnull=False) & ~Q(mac_telefono='')
+    labels = dict(Puerto.TIPOS_VECINO)
+    rows = []
+    for p in Puerto.objects.select_related('switch__plantel').filter(query).order_by('switch__nombre', 'indice'):
+        kind = p.vecino_tipo or 'telefono'
+        rows.append(_port_row(p, vecino_tipo=kind, tipo_equipo=labels[kind], vecino=p.vecino_nombre or p.mac_telefono,
+                              plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or '',
+                              vlan=p.voice_vlan if kind == 'telefono' and p.voice_vlan else p.vlan,
+                              poe_w=round(p.poe_mw / 1000, 1) if p.poe_mw is not None else None))
+    totals = {kind: sum(1 for row in rows if row['vecino_tipo'] == kind) for kind in ('ap', 'telefono')}
+    return dict(titulo='Access points y teléfonos IP',
+                descripcion=f"{totals['ap']} access points y {totals['telefono']} teléfonos detectados por CDP/LLDP.",
+                columnas=[('switch', 'Switch'), ('plantel', 'Plantel'), ('puerto', 'Puerto'), ('tipo_equipo', 'Tipo'),
+                          ('vecino', 'Equipo'), ('plataforma', 'Modelo'), ('vecino_ip', 'IP'), ('vlan', 'VLAN'),
+                          ('poe_w', 'PoE W')], filas=rows)
 
 
 def opticas(params, now):
@@ -320,6 +344,7 @@ REPORTS = {
     'poe': poe,
     'hardware': hardware,
     'topologia': topologia,
+    'aps-telefonos': aps_telefonos,
     'opticas': opticas,
     'tendencias': tendencias,
 }

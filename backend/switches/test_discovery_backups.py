@@ -36,6 +36,9 @@ class DiscoveryTests(TestCase):
                               vecino_ip='192.0.2.9', vecino_plataforma='cisco C9200L')
         Puerto.objects.create(switch=self.switch, nombre='Gi1/0/47', indice=47, vecino_nombre='SW-LAB',
                               vecino_ip='192.0.2.1')
+        # Los teléfonos IP no se proponen para el inventario.
+        Puerto.objects.create(switch=self.switch, nombre='Gi1/0/5', indice=5, vecino_nombre='SEP001122334455',
+                              vecino_ip='192.0.2.50', vecino_tipo='telefono')
         candidates = cdp_candidates()
         self.assertEqual([c['ip'] for c in candidates], ['192.0.2.9'])
         self.assertEqual(candidates[0]['visto_desde'], 'SW-LAB · Gi1/0/48')
