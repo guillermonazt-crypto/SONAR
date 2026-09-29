@@ -44,6 +44,8 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
   // Cambia al abrir un switch desde otra vista: el panel se vuelve a montar y abre el puerto pedido.
   const [panelKey, setPanelKey] = useState(0);
   const restored = useRef(false);
+  // Últimos puertos leídos por switch, para reabrir un switch sin pantalla vacía.
+  const portsCache = useRef(new Map());
 
   async function refresh() {
     try {
@@ -75,15 +77,21 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
     restored.current = true;
     if (loadView("switch") !== device.id) saveView("port", null);
     saveView("switch", device.id);
-    setPorts({ device, items: [], loading: true });
-    let items = [];
+    // Si ya se abrió antes, se muestran sus últimos puertos mientras llega la lectura nueva:
+    // el panel nunca queda vacío esperando a la red.
+    const cached = portsCache.current.get(device.id);
+    setPorts({ device, items: cached || [], loading: !cached, refreshing: true, failed: "" });
     try {
-      items = await api.ports(device.id);
+      const items = await api.ports(device.id);
+      portsCache.current.set(device.id, items);
+      setPorts((current) => current?.device.id === device.id ? { device, items, loading: false, refreshing: false, failed: "" } : current);
     } catch (exception) {
       // Un fallo de red no cierra el switch que se está viendo: el refresco lo reintenta.
       setError(exception.message);
+      setPorts((current) => current?.device.id === device.id
+        ? { device, items: cached || [], loading: false, refreshing: false, failed: exception.message }
+        : current);
     }
-    setPorts((current) => current?.device.id === device.id ? { device, items, loading: false } : current);
   }
 
   function closePorts() {
@@ -115,7 +123,8 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
     try {
       const items = await api.ports(id);
       // Si mientras tanto se cerró el panel o se abrió otro switch, se descarta.
-      setPorts((current) => current?.device.id === id ? { ...current, items } : current);
+      portsCache.current.set(id, items);
+      setPorts((current) => current?.device.id === id ? { ...current, items, failed: "" } : current);
     } catch (exception) {
       setError(exception.message);
     }
@@ -196,7 +205,7 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
           ))}
         </div>
       )}
-      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} onClose={closePorts} />}
+      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} refreshing={ports.refreshing} failed={ports.failed} onRetry={() => showPorts(ports.device)} onClose={closePorts} />}
     </>
   );
 }

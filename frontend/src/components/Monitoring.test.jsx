@@ -75,6 +75,42 @@ describe("Monitoring con refresco automático", () => {
     expect(screen.getByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/})).toBeInTheDocument();
   });
 
+  it("mientras llegan los puertos muestra una silueta, nunca un recuadro vacío", async () => {
+    let resolve;
+    api.ports.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    render(<Monitoring />);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver puertos" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Cargando puertos de SW-LAB");
+    expect(document.querySelectorAll(".physical-port.skeleton").length).toBeGreaterThan(0);
+    await act(async () => resolve([port("up")]));
+    expect(await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/ })).toBeInTheDocument();
+    expect(document.querySelector(".skeleton")).toBeNull();
+  });
+
+  it("al reabrir un switch conserva sus últimos puertos mientras actualiza", async () => {
+    let resolve;
+    api.ports.mockResolvedValueOnce([port("up")]).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    render(<Monitoring />);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver puertos" }));
+    await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/ });
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ver puertos" }));
+    expect(screen.getByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/ })).toBeInTheDocument();
+    expect(screen.getByText("Actualizando…")).toBeInTheDocument();
+    await act(async () => resolve([port("down")]));
+    expect(await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Inactivo/ })).toBeInTheDocument();
+    expect(screen.queryByText("Actualizando…")).not.toBeInTheDocument();
+  });
+
+  it("si la primera lectura falla lo dice y permite reintentar", async () => {
+    api.ports.mockRejectedValueOnce(new Error("Sin conexión")).mockResolvedValue([port("up")]);
+    render(<Monitoring />);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver puertos" }));
+    expect(await screen.findByText(/No se pudieron leer los puertos: Sin conexión/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/ })).toBeInTheDocument();
+  });
+
   it("muestra el estado de salud y los motivos de cada switch", async () => {
     api.list.mockResolvedValue([
       { ...device, estado: "critical", motivos: [{ level: "critical", text: "No responde a SNMP" }] },

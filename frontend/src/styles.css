@@ -1221,3 +1221,77 @@ a.button {
 .trend-total { display: block; font-size: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
 .inline-field select { width: auto; margin: 0; padding: 7px 8px; }
 @media print { .trend-charts .device-chart { height: 180px; } }
+
+/* Estados de carga: el contenido se reemplaza por una silueta, nunca por un recuadro vacío. */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--border) 50%, var(--surface-3) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.3s ease-in-out infinite;
+  border-radius: 4px;
+}
+.skeleton-text {
+  display: inline-block;
+  height: 12px;
+  vertical-align: middle;
+}
+.physical-port.skeleton {
+  border-color: transparent;
+  min-height: 62px;
+}
+.skeleton-panel .switch-brand {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.skeleton-panel .port-bank > .skeleton-text {
+  display: block;
+  margin-bottom: 12px;
+}
+.skeleton-table {
+  display: grid;
+  gap: 8px;
+}
+.skeleton-table .skeleton {
+  height: 44px;
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent-line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.loading-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.refreshing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.is-stale {
+  opacity: 0.55;
+  transition: opacity 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .spinner { animation: none; }
+}

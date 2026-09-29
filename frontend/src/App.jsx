@@ -137,7 +137,15 @@ export default function App() {
               </a>
             )}
           </nav>
-          <Suspense fallback={<p role="status">Cargando…</p>}>
+          <Suspense
+            fallback={
+              <section className="card" role="status" aria-label="Cargando vista">
+                <div className="skeleton-table">
+                  {Array.from({ length: 4 }, (_, index) => <span key={index} className="skeleton" />)}
+                </div>
+              </section>
+            }
+          >
           {tab === "monitoring" ? (
             <Monitoring focus={focus} onFocusHandled={() => setFocus(null)} />
           ) : tab === "overview" ? (

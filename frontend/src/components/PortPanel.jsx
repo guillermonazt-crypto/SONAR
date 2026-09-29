@@ -143,18 +143,44 @@ function HistoryChart({ points }) {
   return <div className="traffic-chart history-chart"><canvas ref={canvas} aria-label="Histórico de tráfico del puerto" /></div>;
 }
 
-export default function PortPanel({ device, items, loading, onClose }) {
+// Silueta del panel mientras llega la primera lectura: mismo tamaño que el real, sin datos inventados.
+function PortPanelSkeleton() {
+  return (
+    <div className="skeleton-panel" aria-hidden="true">
+      <div className="port-summary">
+        {[90, 90, 110, 70, 70].map((width, index) => <span key={index} className="skeleton skeleton-text" style={{ width }} />)}
+      </div>
+      <div className="switch-face">
+        <div className="switch-brand">
+          <span className="skeleton skeleton-text" style={{ width: 70 }} />
+          <span className="skeleton skeleton-text" style={{ width: 140 }} />
+        </div>
+        <div className="port-bank">
+          <span className="skeleton skeleton-text" style={{ width: 130 }} />
+          <div className="physical-grid">
+            {Array.from({ length: 24 }, (_, index) => <span key={index} className="physical-port skeleton" />)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose }) {
   const [selected, setSelected] = useState(null);
   const restoredPort = useRef(false);
   async function openPort(port) {
     restoredPort.current = true;
     saveView("port", port.id);
     setSelected(port);
+    setHistoryLoading(port.id);
     try {
       const result = await api.portHistory(port.id);
       setHistory((current) => ({ ...current, [port.id]: result.points || [] }));
     } catch {
       setHistory((current) => ({ ...current, [port.id]: [] }));
+    } finally {
+      setHistoryLoading((current) => (current === port.id ? null : current));
     }
   }
   function closePort() {
@@ -170,6 +196,7 @@ export default function PortPanel({ device, items, loading, onClose }) {
   }, [loading, items]);
   const [rates, setRates] = useState({});
   const [history, setHistory] = useState({});
+  const [historyLoading, setHistoryLoading] = useState(null);
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -284,16 +311,39 @@ export default function PortPanel({ device, items, loading, onClose }) {
             estado
           </small>
         </div>
-        <button type="button" onClick={onClose}>
-          Cerrar
-        </button>
+        <div className="panel-actions">
+          {refreshing && !loading && (
+            <span className="refreshing-badge" role="status">
+              <i className="spinner" aria-hidden="true" />
+              Actualizando…
+            </span>
+          )}
+          <button type="button" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
       </div>
-      {loading ? (
-        <p role="status">Cargando puertos…</p>
-      ) : !ordered.length ? (
-        <p className="empty">
-          Aún no hay lecturas de puertos para este switch.
+      {failed && (
+        <p role="alert">
+          No se pudieron leer los puertos: {failed}
+          {ordered.length > 0 && " · se muestran los últimos datos conocidos."}{" "}
+          <button type="button" onClick={onRetry}>Reintentar</button>
         </p>
+      )}
+      {loading ? (
+        <>
+          <p role="status" className="loading-line">
+            <i className="spinner" aria-hidden="true" />
+            Cargando puertos de {device.nombre}…
+          </p>
+          <PortPanelSkeleton />
+        </>
+      ) : !ordered.length ? (
+        !failed && (
+          <p className="empty">
+            Aún no hay lecturas de puertos para este switch.
+          </p>
+        )
       ) : (
         <>
           <div className="port-summary" aria-label="Resumen de puertos">
@@ -518,7 +568,12 @@ export default function PortPanel({ device, items, loading, onClose }) {
                     ) : (
                       <p className="traffic-pending">Esperando la siguiente lectura para graficar el consumo…</p>
                     )}
-                    {history[selected.id]?.length > 0 && <HistoryChart points={history[selected.id]} />}
+                    {historyLoading === selected.id && !history[selected.id] ? (
+                      <p className="loading-line traffic-pending" role="status">
+                        <i className="spinner" aria-hidden="true" />
+                        Cargando histórico del puerto…
+                      </p>
+                    ) : history[selected.id]?.length > 0 && <HistoryChart points={history[selected.id]} />}
                   </dd>
                 </div>
                 <div className="port-note">

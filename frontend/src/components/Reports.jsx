@@ -121,6 +121,7 @@ export default function Reports({ onOpenPort = () => {} }) {
   const [kind, setKind] = useViewState("report", "inventario");
   const [params, setParams] = useViewState("report-params", {});
   const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // Al imprimir se muestran todas las filas, no sólo la página visible de la tabla.
   const [printing, setPrinting] = useState(false);
@@ -131,10 +132,12 @@ export default function Reports({ onOpenPort = () => {} }) {
 
   useEffect(() => {
     let active = true;
-    setData(null);
+    // El reporte anterior queda en pantalla (atenuado) hasta que llegue el nuevo.
+    setLoading(true);
     api.report(kind, query)
-      .then((report) => active && (setData(report), setError("")))
-      .catch((exception) => active && setError(exception.message));
+      .then((report) => active && (setData({ ...report, kind }), setError("")))
+      .catch((exception) => active && setError(exception.message))
+      .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
@@ -151,6 +154,8 @@ export default function Reports({ onOpenPort = () => {} }) {
     };
   }, []);
 
+  // Al cambiar de reporte no se muestran columnas del anterior.
+  const shown = data?.kind === kind ? data : null;
   const rows = useMemo(() => (data?.filas || []).map((row, index) => ({ ...row, _key: index })), [data]);
   const columns = (data?.columnas || []).map((column) => ({
     name: column.titulo,
@@ -189,8 +194,8 @@ export default function Reports({ onOpenPort = () => {} }) {
       <section className="card report-card">
         <div className="section-title">
           <div>
-            <h2>{data?.titulo || current[1]}</h2>
-            {data?.descripcion && <small>{data.descripcion}</small>}
+            <h2>{shown?.titulo || current[1]}</h2>
+            {shown?.descripcion && <small>{shown.descripcion}</small>}
           </div>
           <div className="report-actions no-print">
             {param?.options && (
@@ -218,10 +223,20 @@ export default function Reports({ onOpenPort = () => {} }) {
           </div>
         </div>
         {error && <p role="alert">{error}</p>}
-        {!data && !error ? (
-          <p role="status">Generando reporte…</p>
-        ) : data ? (
-          <>
+        {loading && (
+          <p role="status" className="loading-line no-print">
+            <i className="spinner" aria-hidden="true" />
+            Generando reporte…
+          </p>
+        )}
+        {!shown ? (
+          loading && (
+            <div className="skeleton-table" aria-hidden="true">
+              {Array.from({ length: 6 }, (_, index) => <span key={index} className="skeleton" />)}
+            </div>
+          )
+        ) : (
+          <div className={loading ? "is-stale" : ""}>
             {kind === "topologia" && <TopologyMap rows={data.filas} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} />}
@@ -235,8 +250,8 @@ export default function Reports({ onOpenPort = () => {} }) {
                 noDataComponent="Sin datos para este reporte."
               />
             </div>
-          </>
-        ) : null}
+          </div>
+        )}
       </section>
     </>
   );
