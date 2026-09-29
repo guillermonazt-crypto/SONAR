@@ -8,8 +8,8 @@ afterEach(cleanup);
 
 const limits = { cpu_atencion: 70, cpu_riesgo: 90, memoria_atencion: 80, memoria_riesgo: 90 };
 const now = new Date().toISOString();
-const device = (id, nombre, plantel, estado, motivos = []) => ({
-  id, nombre, hostname: `192.0.2.${id}`, plantel_nombre: plantel, division_nombre: "Escuelas", rol: "access",
+const device = (id, nombre, plantel, estado, motivos = [], plantelId = id) => ({
+  id, nombre, plantel: plantelId, hostname: `192.0.2.${id}`, plantel_nombre: plantel, division_nombre: "Escuelas", rol: "access",
   activo: true, lectura_correcta: estado !== "critical", cpu_5m: 10, memoria_usada_pct: 40, estado, motivos,
   puertos: { total: 2, up: 1, down: 1, con_errores: 0, danados: 0, troncales: 0, voz: 0 },
   historial: [{ time: now, cpu: 10, memoria: 40, entrada_bps: 2000, salida_bps: 1000 }],
@@ -39,6 +39,41 @@ describe("Overview", () => {
     expect(within(analysis).queryByText("SW-CAIDO")).not.toBeInTheDocument();
     fireEvent.click(within(analysis).getByRole("button", { name: "Ver puertos" }));
     expect(onOpenPorts).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("muestra el tablero por plantel y filtra el análisis al elegir uno", async () => {
+    const site = (id, nombre, estado, extra = {}) => ({
+      id, nombre, division: "Escuelas", estado, equipos: 1, inactivos: 0,
+      niveles: { ok: estado === "ok" ? 1 : 0, warning: 0, critical: estado === "critical" ? 1 : 0 },
+      sin_respuesta: 0, disponibilidad: 100, puertos: { total: 2, up: 1, con_errores: 0, inestables: 0, saturados: 0 },
+      alertas_abiertas: 0, alertas_sin_reconocer: 0, mantenimiento: false, ...extra,
+    });
+    api.summary.mockResolvedValue({
+      generado: now, ultima_lectura: now, worker_atrasado: false,
+      umbrales: { core: limits, distribution: limits, access: limits },
+      planteles: [
+        site(2, "Tulancingo", "critical", { alertas_abiertas: 1, alertas_sin_reconocer: 1 }),
+        site(1, "Apan", "ok", { mantenimiento: true }),
+        site(3, "Zimapán", "none", { equipos: 0, disponibilidad: null }),
+      ],
+      switches: [
+        device(1, "SW-OK", "Apan", "ok", [], 1),
+        device(2, "SW-CAIDO", "Tulancingo", "critical", [{ level: "critical", tipo: "snmp", text: "No responde a SNMP" }], 2),
+      ],
+    });
+    api.zabbix.mockResolvedValue({ configured: false, hosts: [] });
+    render(<Overview />);
+    const board = (await screen.findByRole("heading", { name: "Estado por plantel" })).closest("section");
+    expect(within(board).getByText("1 de 3 con incidencias")).toBeInTheDocument();
+    expect(within(board).getByText("Sin equipos")).toBeInTheDocument();
+    expect(within(board).getByText("En mantenimiento")).toBeInTheDocument();
+    const analysis = screen.getByRole("heading", { name: "Estado por equipo" }).closest("section");
+    fireEvent.click(within(board).getByRole("button", { name: /^Apan/ }));
+    expect(within(analysis).getByText("SW-OK")).toBeInTheDocument();
+    expect(within(analysis).queryByText("SW-CAIDO")).not.toBeInTheDocument();
+    expect(within(analysis).getByRole("button", { name: "Todos (1)" })).toBeInTheDocument();
+    fireEvent.click(within(analysis).getByRole("button", { name: /Quitar filtro de plantel/ }));
+    expect(within(analysis).getByText("SW-CAIDO")).toBeInTheDocument();
   });
 
   it("avisa cuando el worker está atrasado", async () => {

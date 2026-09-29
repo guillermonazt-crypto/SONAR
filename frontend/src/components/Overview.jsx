@@ -4,16 +4,11 @@ import { api } from "../api/client";
 import { formatRate, formatUptime, timeAgo } from "../utils/format";
 import { useAutoRefresh } from "../utils/refresh";
 import { cssVar, useTheme } from "../utils/theme";
+import SiteBoard from "./SiteBoard";
+import { LEVELS, StatusBadge } from "./Status";
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, LineController, Tooltip, Legend);
 
-// Los niveles y motivos los calcula el backend (switches/health.py), el mismo
-// código que dispara las alertas; aquí sólo se presentan.
-const LEVELS = {
-  ok: { rank: 0, label: "Normal", icon: "●" },
-  warning: { rank: 1, label: "Atención", icon: "▲" },
-  critical: { rank: 2, label: "En riesgo", icon: "✕" },
-};
 const FILTERS = [
   ["all", "Todos"],
   ["critical", "En riesgo"],
@@ -112,11 +107,6 @@ function DeviceCharts({ points }) {
   );
 }
 
-function StatusBadge({ level }) {
-  const info = LEVELS[level] || LEVELS.ok;
-  return <span className={`status-badge status-${level}`}><span aria-hidden="true">{info.icon}</span> {info.label}</span>;
-}
-
 function metricLevel(value, warning, critical) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "ok";
   if (Number(value) >= critical) return "critical";
@@ -185,6 +175,7 @@ export default function Overview({ onOpenPorts }) {
   const [error, setError] = useState("");
   const [zabbix, setZabbix] = useState(null);
   const [filter, setFilter] = useState("all");
+  const [site, setSite] = useState(null);
   const zabbixAt = useRef(0);
   async function refresh(force = false, auto = false) {
     try {
@@ -214,7 +205,10 @@ export default function Overview({ onOpenPorts }) {
   const thresholds = summary?.umbrales || {};
   const countLevel = (level) => devices.filter((device) => device.estado === level).length;
   const atRisk = devices.filter((device) => device.estado !== "ok");
-  const visible = filter === "all" ? devices : devices.filter((device) => device.estado === filter);
+  const siteBoard = summary?.planteles || [];
+  const siteName = siteBoard.find((item) => item.id === site)?.nombre;
+  const inSite = siteName ? devices.filter((device) => device.plantel === site) : devices;
+  const visible = filter === "all" ? inSite : inSite.filter((device) => device.estado === filter);
   const sites = groupBySite(visible);
   const totals = devices.reduce((sum, device) => {
     const stats = device.puertos || {};
@@ -259,6 +253,8 @@ export default function Overview({ onOpenPorts }) {
         </article>
       </div>
 
+      <SiteBoard sites={siteBoard} selected={siteName ? site : null} onSelect={setSite} />
+
       <section className="card risk-panel">
         <div className="section-title">
           <div>
@@ -298,11 +294,16 @@ export default function Overview({ onOpenPorts }) {
           <div>
             <span className="eyebrow">ANÁLISIS</span>
             <h2>Estado por equipo</h2>
+            {siteName && (
+              <button type="button" className="chip" onClick={() => setSite(null)} aria-label={`Quitar filtro de plantel ${siteName}`}>
+                Plantel: {siteName} ✕
+              </button>
+            )}
           </div>
           <div className="filter-row" role="group" aria-label="Filtrar equipos por estado">
             {FILTERS.map(([id, label]) => (
               <button key={id} type="button" className={filter === id ? "active" : ""} aria-pressed={filter === id} onClick={() => setFilter(id)}>
-                {label} ({id === "all" ? devices.length : countLevel(id)})
+                {label} ({id === "all" ? inSite.length : inSite.filter((device) => device.estado === id).length})
               </button>
             ))}
           </div>

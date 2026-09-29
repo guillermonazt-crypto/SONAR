@@ -99,6 +99,11 @@ y el histórico de 24 h (CPU, memoria y tráfico total) agrupado por plantel.
 Las reglas viven en `backend/switches/health.py`; los umbrales de CPU y memoria se
 editan por rol (core, distribución, acceso) en el admin Django, en **Umbrales por rol**.
 
+El tablero **Estado por plantel** (arriba del Resumen) muestra cada plantel activo con
+el peor estado de sus equipos (mismas reglas de `health.py`), cuántos responden a SNMP,
+puertos activos, alertas abiertas y puertos con errores. Al elegir un plantel se filtra
+el análisis por equipo. Los planteles sin equipos aparecen como "Sin equipos".
+
 Los errores de puerto se evalúan por ciclo (`errores_nuevos`, `ultimo_error`), no
 por el contador acumulado desde el arranque del equipo.
 

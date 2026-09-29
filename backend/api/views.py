@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.core.cache import cache
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -11,7 +11,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
-from switches.health import STALE_MINUTES, assess, port_stats, thresholds_by_role
+from switches.health import STALE_MINUTES, assess, port_stats, summarize_sites, thresholds_by_role
 from switches import backups, discovery
 from switches.models import Alerta, Descubierto, Mantenimiento, Puerto, Respaldo, Switch, UmbralOptico
 from usuarios.audit import differences, registrar, snapshot
@@ -130,7 +130,7 @@ def search(request):
 
 
 def build_summary(now=None):
-    """Estado, motivos, conteos de puertos e histórico de todos los switches."""
+    """Estado, motivos, conteos de puertos e histórico de todos los switches y planteles."""
     now = now or timezone.now()
     switches = list(Switch.objects.select_related('plantel__division').all())
     stats = port_stats([s.pk for s in switches], now)
@@ -140,12 +140,19 @@ def build_summary(now=None):
         histories = history.switch_histories([s.nombre for s in switches if s.activo])
     except Exception as error:
         histories, detail = {}, f'Histórico no disponible: {error}'
+    alerts = {}
+    for alert in Alerta.objects.filter(fin__isnull=True).order_by('inicio'):
+        # Sólo debería haber una abierta por switch; si hubiera más, cuenta la primera.
+        alerts.setdefault(alert.switch_id, alert)
     items = []
     for switch in switches:
         level, reasons = assess(switch, stats[switch.pk], thresholds[switch.rol], now)
+        alert = alerts.get(switch.pk)
         items.append(dict(SwitchSerializer(switch).data,
                           division_nombre=switch.plantel.division.nombre,
                           estado=level, motivos=reasons, puertos=stats[switch.pk],
+                          alerta=alert and dict(id=alert.pk, desde=alert.inicio.isoformat(),
+                                                reconocida=alert.reconocida_en is not None),
                           historial=histories.get(switch.nombre, [])))
     last = Switch.objects.filter(activo=True).aggregate(last=Max('ultima_consulta'))['last']
     return dict(
@@ -154,8 +161,23 @@ def build_summary(now=None):
         worker_atrasado=bool(items) and (last is None or (now - last).total_seconds() > STALE_MINUTES * 60),
         umbrales=thresholds,
         historial_detalle=detail,
+        planteles=site_summary(switches, items, alerts.values(), now),
         switches=items,
     )
+
+
+def site_summary(switches, items, open_alerts, now):
+    """Tablero por plantel: todos los planteles activos y los que tienen equipos."""
+    used = {s.plantel_id for s in switches}
+    places = Plantel.objects.select_related('division').filter(Q(activo=True) | Q(pk__in=used))
+    site_of = {s.pk: s.plantel_id for s in switches}
+    by_site = {}
+    for alert in open_alerts:
+        site = site_of[alert.switch_id]
+        total, pending = by_site.get(site, (0, 0))
+        by_site[site] = (total + 1, pending + (alert.reconocida_en is None))
+    maintenance = {pk for pk in Mantenimiento.activas(now).values_list('plantel', flat=True) if pk}
+    return summarize_sites(places, items, by_site, maintenance)
 
 
 @require_GET

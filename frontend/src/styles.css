@@ -1170,3 +1170,37 @@ a.button {
 @media (max-width: 800px) {
   .backups-layout { grid-template-columns: 1fr; }
 }
+/* Tablero por plantel (Resumen). */
+.site-board .section-title small { color: var(--muted-2); }
+.site-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+.site-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-heavy);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--text);
+  min-width: 0;
+}
+.site-tile.site-ok { border-left-color: var(--ok); }
+.site-tile.site-warning { border-left-color: var(--warning); }
+.site-tile.site-critical { border-left-color: var(--critical); }
+.site-tile.selected { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--accent-ring); }
+.site-tile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.site-tile-head strong { display: block; font-size: 14px; }
+.site-tile-head small { display: block; font-size: 11px; color: var(--muted-2); }
+.site-tile-levels { font-size: 12px; color: var(--text-2); }
+.site-tile-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 10px; }
+.site-tile-kpis small { display: block; font-size: 10px; letter-spacing: 0.5px; color: var(--muted-2); text-transform: uppercase; }
+.site-tile-kpis b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.site-tile .status-maintenance { margin-top: 0; align-self: flex-start; }
+.status-none { color: var(--muted); background: transparent; }
+.chip { margin-top: 6px; padding: 3px 10px; font-size: 12px; border-radius: 999px; }
