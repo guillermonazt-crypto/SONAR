@@ -42,4 +42,28 @@ describe("Reports", () => {
     expect(map.querySelectorAll("line")).toHaveLength(2);
     expect(map.querySelectorAll("circle.external")).toHaveLength(1);
   });
+
+  it("muestra tendencias de 7 o 30 días y avisa si InfluxDB no respondió", async () => {
+    const serie = [
+      { dia: "2026-09-28", cpu: 20, memoria: 50, entrada_bps: 1000, salida_bps: 500, alertas: 2 },
+      { dia: "2026-09-29", cpu: null, memoria: null, entrada_bps: null, salida_bps: null, alertas: 1 },
+    ];
+    api.report.mockImplementation((kind, query) => Promise.resolve(kind === "tendencias"
+      ? { ...report(kind, [{ clave: "switch", titulo: "Switch" }, { clave: "cpu_max", titulo: "CPU máx. %" }],
+        [{ switch: "SW-CORE", cpu_max: 91.5 }], `Tendencias ${query}`),
+      serie, detalle: query.includes("30") ? "InfluxDB no respondió (timeout); sólo se muestran alertas registradas en SONAR." : null }
+      : report(kind, [], [])));
+    const { unmount } = render(<Reports />);
+    fireEvent.click(screen.getByRole("button", { name: "Tendencias" }));
+    expect(await screen.findByText("91.5%")).toBeInTheDocument();
+    expect(api.report).toHaveBeenLastCalledWith("tendencias", "?dias=7");
+    expect(screen.getByText("3")).toHaveClass("trend-total");
+    expect(screen.getByText(/Día con más alertas/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "30" } });
+    expect(await screen.findByText(/InfluxDB no respondió/)).toBeInTheDocument();
+    unmount();
+    // Al volver se abre el mismo reporte con el mismo periodo.
+    render(<Reports />);
+    await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("tendencias", "?dias=30"));
+  });
 });

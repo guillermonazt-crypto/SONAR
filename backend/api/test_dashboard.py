@@ -91,3 +91,70 @@ class AlertFilterTests(TestCase):
         # Los motivos antiguos se entregan ya clasificados.
         legacy = self.client.get(f'/api/alertas/{self.legacy.pk}/').json()
         self.assertEqual(legacy['motivos'][0]['tipo'], 'snmp')
+
+
+class TrendReportTests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        self.reader = get_user_model().objects.create_user(username='reader', password='test-password', rol='lector')
+        plantel = Plantel.objects.create(nombre='Apan', division=Division.objects.create(nombre='Escuelas'))
+        self.core = Switch.objects.create(nombre='SW-CORE', hostname='192.0.2.1', plantel=plantel, rol='core')
+        self.edge = Switch.objects.create(nombre='SW-EDGE', hostname='192.0.2.2', plantel=plantel)
+        self.now = timezone.now()
+        Alerta.objects.create(switch=self.edge, inicio=self.now - timedelta(hours=2), fin=self.now - timedelta(hours=1))
+        # Episodio que empezó antes del periodo: sólo cuenta la parte dentro.
+        Alerta.objects.create(switch=self.core, inicio=self.now - timedelta(days=40), fin=self.now - timedelta(days=29, hours=23))
+
+    def point(self, hours_ago, cpu, memoria, entrada, salida, uptime):
+        from datetime import timedelta
+        return dict(time=(self.now - timedelta(hours=hours_ago)).isoformat(), cpu=cpu, memoria=memoria,
+                    entrada_bps=entrada, salida_bps=salida, uptime=uptime)
+
+    def test_trends_from_influx(self):
+        from unittest.mock import patch
+        series = {'SW-CORE': [self.point(3, 20, 50, 1000, 3000, 900), self.point(2, 60, 70, 2000, 1000, 100),
+                              self.point(1, None, None, None, None, 4000)],
+                  'SW-EDGE': []}
+        with patch('api.history.switch_trends', return_value=(series, 'red_15m')) as trends:
+            self.client.force_login(self.reader)
+            data = self.client.get('/api/reportes/tendencias/', {'dias': 30}).json()
+        trends.assert_called_once()
+        self.assertEqual(trends.call_args.args[1], 30)
+        self.assertEqual(data['titulo'], 'Tendencias · últimos 30 días')
+        self.assertIn('red_15m', data['descripcion'])
+        rows = {row['switch']: row for row in data['filas']}
+        core = rows['SW-CORE']
+        self.assertEqual((core['cpu_prom'], core['cpu_max'], core['memoria_max']), (40.0, 60.0, 70.0))
+        self.assertEqual((core['entrada_bps'], core['pico_bps'], core['reinicios']), (1500.0, 3000.0, 1))
+        self.assertEqual((core['alertas'], core['minutos_riesgo']), (0, 60))
+        self.assertEqual((rows['SW-EDGE']['alertas'], rows['SW-EDGE']['cpu_prom']), (1, None))
+        self.assertEqual(len(data['serie']), 31)
+        today = data['serie'][-1]
+        self.assertEqual(today['alertas'], 1)
+
+    def test_trends_fall_back_when_influx_is_down(self):
+        from unittest.mock import patch
+        with patch('api.history.switch_trends', side_effect=ConnectionError('sin ruta')):
+            self.client.force_login(self.reader)
+            data = self.client.get('/api/reportes/tendencias/', {'dias': 9}).json()
+            csv = self.client.get('/api/reportes/tendencias/', {'formato': 'csv'})
+        # Sólo 7 o 30 días: 9 se ajusta a 7.
+        self.assertEqual(data['titulo'], 'Tendencias · últimos 7 días')
+        self.assertIn('InfluxDB no respondió', data['detalle'])
+        rows = {row['switch']: row for row in data['filas']}
+        self.assertEqual((rows['SW-EDGE']['alertas'], rows['SW-EDGE']['minutos_riesgo']), (1, 60))
+        self.assertIsNone(rows['SW-EDGE']['reinicios'])
+        self.assertEqual(csv.status_code, 200)
+
+    def test_trend_bucket_fallback(self):
+        from unittest.mock import patch
+        from api import history
+
+        def fake(names, hours, every, bucket):
+            if bucket.endswith('_15m'):
+                raise RuntimeError('bucket not found')
+            return {'SW': [dict(time='2026-01-01T00:00:00+00:00')]}
+        with patch.object(history, 'switch_histories', side_effect=fake):
+            series, bucket = history.switch_trends(['SW'], 30)
+        self.assertEqual(bucket, history.influx_settings()[3])
+        self.assertEqual(len(series['SW']), 1)

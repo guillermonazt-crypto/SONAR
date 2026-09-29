@@ -141,6 +141,11 @@ CISCO-ENVMON-MIB), el PoE al 90 % o más del presupuesto, los puertos inestables
   sin notificarlas.
 - **Bitácora de cambios** (Inventario, sólo editores): altas, ediciones, bajas,
   reconocimientos, respaldos e inicios de sesión.
+- **Reportes → Tendencias**: CPU y memoria (promedio y máximo), tráfico promedio y pico,
+  reinicios, alertas y minutos en riesgo por switch en 7 o 30 días, con gráficas diarias
+  de toda la red. Lee el bucket de largo plazo `<INFLUX_BUCKET>_15m` (o
+  `INFLUX_TREND_BUCKET`) y, si no existe, el crudo. Si InfluxDB no responde, el reporte
+  sale igual con las alertas guardadas en Django y lo avisa.
 - **Reportes**: inventario, disponibilidad, puertos sin uso, inestables, saturados y
   con errores, PoE, hardware, ópticas y topología CDP. En pantalla, CSV o impresos.
 

@@ -1209,3 +1209,15 @@ a.button {
 .filter-bar select { width: auto; max-width: 220px; margin: 0; padding: 6px 8px; }
 .filter-bar .chip { margin-top: 0; }
 .alert-filters { padding: 12px 16px; margin-bottom: 18px; }
+/* Reporte de tendencias. */
+.trend-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 16px;
+  margin: 12px 0 4px;
+}
+.trend-charts figure { margin: 0; min-width: 0; }
+.trend-charts figcaption { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 6px; }
+.trend-total { display: block; font-size: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
+.inline-field select { width: auto; margin: 0; padding: 7px 8px; }
+@media print { .trend-charts .device-chart { height: 180px; } }

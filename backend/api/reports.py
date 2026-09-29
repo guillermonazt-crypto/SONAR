@@ -2,7 +2,7 @@
 
 Cada reporte devuelve {titulo, descripcion, columnas: [(clave, título)], filas: [dict]}.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -180,6 +180,101 @@ def opticas(params, now):
                           ('motivos', 'Motivos')], filas=rows)
 
 
+TREND_DAYS = (7, 30)
+
+
+def _mean(values):
+    values = [value for value in values if value is not None]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _peak(values):
+    values = [value for value in values if value is not None]
+    return round(max(values), 1) if values else None
+
+
+def _reboots(points):
+    """Reinicios en la serie: el uptime baja entre dos ventanas consecutivas."""
+    uptimes = [point['uptime'] for point in points if point.get('uptime') is not None]
+    return sum(1 for before, after in zip(uptimes, uptimes[1:]) if after < before)
+
+
+def _risk_minutes(alerts, since, now):
+    return round(sum(max(0, (min(a.fin or now, now) - max(a.inicio, since)).total_seconds() / 60) for a in alerts))
+
+
+def _local_day(iso):
+    return timezone.localtime(datetime.fromisoformat(iso)).date().isoformat()
+
+
+def tendencias(params, now):
+    """CPU, memoria, tráfico, reinicios y alertas de los últimos 7 o 30 días.
+
+    Las métricas salen de InfluxDB (bucket de largo plazo si existe). Si InfluxDB
+    no responde, el reporte se entrega igual con lo que guarda Django (alertas y
+    minutos en riesgo) y lo indica en la descripción.
+    """
+    days = _days(params, 7)
+    days = min(TREND_DAYS, key=lambda option: abs(option - days))
+    since = now - timedelta(days=days)
+    switches = list(Switch.objects.select_related('plantel').filter(activo=True))
+    alerts = {}
+    for alert in Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now):
+        alerts.setdefault(alert.switch_id, []).append(alert)
+    detail = None
+    try:
+        from .history import switch_trends
+        series, bucket = switch_trends([s.nombre for s in switches], days)
+    except Exception as error:
+        series, bucket, detail = {}, None, f'InfluxDB no respondió ({error}); sólo se muestran alertas registradas en SONAR.'
+    rows = []
+    for s in switches:
+        points = series.get(s.nombre, [])
+        episodes = alerts.get(s.pk, [])
+        traffic = [max(p['entrada_bps'] or 0, p['salida_bps'] or 0) if p['entrada_bps'] is not None or p['salida_bps'] is not None
+                   else None for p in points]
+        rows.append(dict(
+            switch=s.nombre, switch_id=s.pk, plantel=s.plantel.nombre,
+            cpu_prom=_mean(p['cpu'] for p in points), cpu_max=_peak(p['cpu'] for p in points),
+            memoria_prom=_mean(p['memoria'] for p in points), memoria_max=_peak(p['memoria'] for p in points),
+            entrada_bps=_mean(p['entrada_bps'] for p in points), salida_bps=_mean(p['salida_bps'] for p in points),
+            pico_bps=_peak(traffic), reinicios=_reboots(points) if points else None,
+            alertas=sum(1 for a in episodes if a.inicio >= since), minutos_riesgo=_risk_minutes(episodes, since, now)))
+    rows.sort(key=lambda row: (-row['minutos_riesgo'], -(row['cpu_max'] or 0), row['switch']))
+    # Serie diaria de toda la red: promedio de CPU/memoria, suma del tráfico promedio y alertas nuevas.
+    by_day = {}
+    for name, points in series.items():
+        for point in points:
+            day = by_day.setdefault(_local_day(point['time']), dict(cpu=[], memoria=[], entrada={}, salida={}))
+            day['cpu'].append(point['cpu'])
+            day['memoria'].append(point['memoria'])
+            for key, field in (('entrada', 'entrada_bps'), ('salida', 'salida_bps')):
+                if point[field] is not None:
+                    day[key].setdefault(name, []).append(point[field])
+    new_alerts = {}
+    for episodes in alerts.values():
+        for alert in episodes:
+            if alert.inicio >= since:
+                key = timezone.localtime(alert.inicio).date().isoformat()
+                new_alerts[key] = new_alerts.get(key, 0) + 1
+    serie = []
+    for offset in range(days, -1, -1):
+        key = (timezone.localdate(now) - timedelta(days=offset)).isoformat()
+        day = by_day.get(key)
+        total = lambda side: round(sum(_mean(v) for v in day[side].values())) if day and day[side] else None
+        serie.append(dict(dia=key, cpu=_mean(day['cpu']) if day else None, memoria=_mean(day['memoria']) if day else None,
+                          entrada_bps=total('entrada'), salida_bps=total('salida'), alertas=new_alerts.get(key, 0)))
+    source = f'InfluxDB ({bucket})' if bucket else 'sin lecturas en InfluxDB'
+    return dict(titulo=f'Tendencias · últimos {days} días',
+                descripcion=detail or f'Promedios y picos por switch ({source}); alertas y minutos en riesgo del centro de alertas.',
+                detalle=detail, serie=serie,
+                columnas=[('switch', 'Switch'), ('plantel', 'Plantel'), ('cpu_prom', 'CPU prom. %'), ('cpu_max', 'CPU máx. %'),
+                          ('memoria_prom', 'Memoria prom. %'), ('memoria_max', 'Memoria máx. %'),
+                          ('entrada_bps', 'Entrada prom. bps'), ('salida_bps', 'Salida prom. bps'), ('pico_bps', 'Pico bps'),
+                          ('reinicios', 'Reinicios'), ('alertas', 'Alertas'), ('minutos_riesgo', 'Minutos en riesgo')],
+                filas=rows)
+
+
 REPORTS = {
     'inventario': inventario,
     'disponibilidad': disponibilidad,
@@ -191,6 +286,7 @@ REPORTS = {
     'hardware': hardware,
     'topologia': topologia,
     'opticas': opticas,
+    'tendencias': tendencias,
 }
 
 

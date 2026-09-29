@@ -21,15 +21,17 @@ def _device_filter(names):
     return f'contains(value: r.device, set: [{items}])'
 
 
-def switch_histories(names, hours=24, every='15m'):
+def switch_histories(names, hours=24, every='15m', bucket=None):
     """CPU, memoria y tráfico total por switch en dos consultas para todos.
 
     Devuelve {nombre: [ {time, cpu, memoria, uptime, entrada_bps, salida_bps} ]}.
+    `bucket` permite leer el bucket de largo plazo (promedios de 15 min).
     """
     names = list(dict.fromkeys(names))
     if not names:
         return {}
-    url, token, org, bucket = influx_settings()
+    url, token, org, default_bucket = influx_settings()
+    bucket = bucket or default_bucket
     base = f'''from(bucket: "{flux_string(bucket)}")
   |> range(start: -{int(hours)}h)
   |> filter(fn: (r) => {_device_filter(names)})'''
@@ -133,3 +135,34 @@ def optics_snapshot(hours=24):
             for record in table.records:
                 slot(record)['rx_max_24h'] = record.get_value()
     return list(readings.values())
+
+
+def trend_buckets():
+    """Buckets a intentar para tendencias de días: el de largo plazo primero.
+
+    scripts/setup_influx_downsampling.py crea <INFLUX_BUCKET>_15m con retención
+    larga; INFLUX_TREND_BUCKET permite nombrar otro. Si no existe o está vacío se
+    usa el bucket crudo.
+    """
+    bucket = influx_settings()[3]
+    return list(dict.fromkeys(filter(None, [os.getenv('INFLUX_TREND_BUCKET'), f'{bucket}_15m', bucket])))
+
+
+def switch_trends(names, days):
+    """Series de `days` días por switch (ventanas de 1 h hasta 7 días, de 6 h después).
+
+    Devuelve (series, bucket usado). Lanza la última excepción si ningún bucket responde.
+    """
+    every = '1h' if days <= 7 else '6h'
+    error = None
+    for bucket in trend_buckets():
+        try:
+            series = switch_histories(names, hours=days * 24, every=every, bucket=bucket)
+        except Exception as exception:
+            error = exception
+            continue
+        if any(series.values()):
+            return series, bucket
+    if error is not None:
+        raise error
+    return {name: [] for name in names}, None
