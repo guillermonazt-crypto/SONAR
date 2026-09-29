@@ -87,7 +87,7 @@ class AlertaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Alerta
         fields = ['id', 'switch', 'nivel', 'motivos', 'inicio', 'fin', 'notificada', 'en_mantenimiento',
-                  'reconocida_por', 'reconocida_en', 'nota']
+                  'reconocida_por', 'reconocida_en', 'nota', 'escalada_en']
         read_only_fields = fields
 
 

@@ -20,15 +20,19 @@ SATURATION_PCT = 90
 POE_BUDGET_PCT = 90
 HARDWARE_LABEL = {'temperatura': 'Sensor de temperatura', 'ventilador': 'Ventilador', 'fuente': 'Fuente de poder'}
 LEVEL_RANK = {'ok': 0, 'warning': 1, 'critical': 2}
-DEFAULTS = dict(cpu_atencion=70, cpu_riesgo=90, memoria_atencion=80, memoria_riesgo=90)
+DEFAULTS = dict(cpu_atencion=70, cpu_riesgo=90, memoria_atencion=80, memoria_riesgo=90, puertos_riesgo=3,
+                escalar_minutos=30)
+# Sin fila en el admin, un core caído se escala antes que un switch de acceso.
+ROLE_DEFAULTS = {'core': dict(escalar_minutos=15), 'distribution': dict(escalar_minutos=30),
+                 'access': dict(escalar_minutos=60)}
+THRESHOLD_FIELDS = tuple(DEFAULTS)
 
 
 def thresholds_by_role():
     """Umbrales configurados en el admin; los roles sin fila usan DEFAULTS."""
-    configured = {row.rol: dict(cpu_atencion=row.cpu_atencion, cpu_riesgo=row.cpu_riesgo,
-                                memoria_atencion=row.memoria_atencion, memoria_riesgo=row.memoria_riesgo)
+    configured = {row.rol: {field: getattr(row, field) for field in THRESHOLD_FIELDS}
                   for row in UmbralRol.objects.all()}
-    return {rol: configured.get(rol, dict(DEFAULTS)) for rol, _label in Switch.ROLES}
+    return {rol: configured.get(rol, {**DEFAULTS, **ROLE_DEFAULTS.get(rol, {})}) for rol, _label in Switch.ROLES}
 
 
 def port_stats(switch_ids, now=None):
@@ -130,6 +134,13 @@ def assess(switch, stats, thresholds, now=None):
     if stats.get('inestables'):
         level = _worst(level, 'warning')
         reasons.append(_reason('warning', 'inestables', f"{stats['inestables']} puerto(s) inestables (≥ {FLAP_CHANGES} cambios en 1 h)"))
+    # Condición compuesta: varios puertos fallando a la vez escalan el switch a riesgo.
+    limit = thresholds.get('puertos_riesgo') or 0
+    for key, what in (('con_errores', 'con errores nuevos'), ('inestables', 'inestables')):
+        if limit and stats.get(key, 0) >= limit:
+            level = 'critical'
+            reasons.append(_reason('critical', 'compuesta',
+                                   f"Falla generalizada: {stats[key]} puertos {what} a la vez (≥ {limit})"))
     if stats.get('saturados'):
         level = _worst(level, 'warning')
         reasons.append(_reason('warning', 'saturacion', f"{stats['saturados']} puerto(s) al {SATURATION_PCT}% o más de su capacidad"))

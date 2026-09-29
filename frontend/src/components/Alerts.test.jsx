@@ -52,6 +52,12 @@ describe("Alerts", () => {
     await waitFor(() => expect(api.acknowledge).toHaveBeenCalledWith(9, "Cuadrilla en camino"));
   });
 
+  it("marca las alertas escaladas por falta de atención", async () => {
+    api.alerts.mockResolvedValue([{ ...alert, escalada_en: new Date().toISOString() }]);
+    render(<Alerts user={{ can_edit: false }} />);
+    expect(await screen.findByText(/Escalada .* por falta de atención/)).toBeInTheDocument();
+  });
+
   it("el lector sólo ve el estado, sin reconocer ni programar", async () => {
     render(<Alerts user={{ can_edit: false }} />);
     expect(await screen.findByText("Sin atender")).toBeInTheDocument();

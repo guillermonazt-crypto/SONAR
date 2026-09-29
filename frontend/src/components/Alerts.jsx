@@ -185,6 +185,9 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
                   <small>{alert.switch.hostname} · {alert.switch.plantel_nombre} · desde {timeAgo(alert.inicio)}</small>
                   <Reasons items={alert.motivos} />
                   {alert.en_mantenimiento && <span className="status-badge status-maintenance">En mantenimiento: no se notificó</span>}
+                  {alert.escalada_en && !alert.reconocida_por && (
+                    <span className="status-badge status-critical" title={when(alert.escalada_en)}>Escalada {timeAgo(alert.escalada_en)} por falta de atención</span>
+                  )}
                 </div>
                 <div className="alert-actions">
                   {alert.reconocida_por ? (

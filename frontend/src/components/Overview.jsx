@@ -289,7 +289,7 @@ export default function Overview({ onOpenPorts }) {
           <small className="thresholds">
             Umbrales (editables por rol en el administrador): CPU ≥ {core.cpu_atencion}% atención y ≥ {core.cpu_riesgo}% riesgo ·
             memoria ≥ {core.memoria_atencion}% / ≥ {core.memoria_riesgo}% · sin respuesta SNMP = riesgo · lectura de hace más de 5 min,
-            reinicio en las últimas 24 h o errores nuevos en puertos = atención.
+            reinicio en las últimas 24 h o errores nuevos en puertos = atención.{core.puertos_riesgo ? ` ${core.puertos_riesgo} o más puertos con errores o inestables a la vez = riesgo.` : ""}
           </small>
         )}
         {summary?.historial_detalle && <small className="thresholds">{summary.historial_detalle}</small>}

@@ -7,10 +7,9 @@ from datetime import timedelta
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from switches.health import FLAP_CHANGES, assess, port_stats, thresholds_by_role
+from switches.health import FLAP_CHANGES, assess, port_stats, reason_type, thresholds_by_role
 from switches.models import Alerta, EventoPuerto, Puerto, Switch
 
-UNREACHABLE = 'No responde a SNMP'
 
 
 def _days(params, default):
@@ -51,7 +50,7 @@ def disponibilidad(params, now):
     outages = Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now)
     down = {}
     for alert in outages:
-        if not any(reason.get('text') == UNREACHABLE for reason in alert.motivos):
+        if not any(reason_type(reason) == 'snmp' for reason in alert.motivos):
             continue
         start, end = max(alert.inicio, since), min(alert.fin or now, now)
         down[alert.switch_id] = down.get(alert.switch_id, 0) + max(0, (end - start).total_seconds() / 60)

@@ -18,7 +18,8 @@ class PuertoAdmin(admin.ModelAdmin):
 
 @admin.register(UmbralRol)
 class UmbralRolAdmin(admin.ModelAdmin):
-    list_display = ['rol', 'cpu_atencion', 'cpu_riesgo', 'memoria_atencion', 'memoria_riesgo']
+    list_display = ['rol', 'cpu_atencion', 'cpu_riesgo', 'memoria_atencion', 'memoria_riesgo', 'puertos_riesgo',
+                    'escalar_minutos']
 
 @admin.register(UmbralOptico)
 class UmbralOpticoAdmin(admin.ModelAdmin):

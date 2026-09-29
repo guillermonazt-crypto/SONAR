@@ -117,6 +117,15 @@ con un cooldown (`ALERT_COOLDOWN_MINUTES`). Canales opcionales en `.env`: correo
 (`ALERT_EMAIL_TO` + `EMAIL_*`), Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
 y webhook de Teams/Slack/Google Chat (`ALERT_WEBHOOK_URL`).
 
+**Alertas inteligentes.** Condición compuesta: si 3 o más puertos de un mismo switch
+tienen errores nuevos (o están inestables) a la vez, el switch pasa a rojo aunque cada
+puerto por separado sólo sería "atención"; el número se ajusta por rol (`puertos_riesgo`,
+0 lo desactiva). Escalamiento por rol: una alerta que sigue abierta y sin reconocer más
+de `escalar_minutos` (core 15, distribución 30, acceso 60 por defecto) se vuelve a
+avisar una sola vez por todos los canales y, además, a `ALERT_ESCALATION_EMAIL_TO`.
+Nunca hay dos alertas abiertas para el mismo switch: si aparecen duplicados se conserva
+la más antigua.
+
 La salud también considera el hardware (fuentes, ventiladores y temperatura por
 CISCO-ENVMON-MIB), el PoE al 90 % o más del presupuesto, los puertos inestables
 (4 o más cambios up/down en 1 h) y los puertos al 90 % o más de su capacidad.

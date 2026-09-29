@@ -150,6 +150,12 @@ class UmbralRol(models.Model):
     cpu_riesgo = models.PositiveSmallIntegerField(default=90)
     memoria_atencion = models.PositiveSmallIntegerField(default=80)
     memoria_riesgo = models.PositiveSmallIntegerField(default=90)
+    # Condición compuesta: tantos puertos con errores (o inestables) a la vez
+    # indican una falla del equipo o de su enlace, no de un cable suelto.
+    puertos_riesgo = models.PositiveSmallIntegerField(
+        default=3, help_text='Puertos con errores o inestables a la vez que ponen el switch en riesgo (0 = desactivado)')
+    escalar_minutos = models.PositiveSmallIntegerField(
+        default=30, help_text='Minutos en riesgo sin reconocer antes de escalar la alerta (0 = no escalar)')
 
     class Meta:
         verbose_name = "Umbral por rol"
@@ -234,6 +240,8 @@ class Alerta(models.Model):
                                        related_name='alertas_reconocidas')
     reconocida_en = models.DateTimeField(null=True, blank=True)
     nota = models.TextField(blank=True, default='')
+    # Aviso adicional cuando sigue abierta y sin reconocer más de UmbralRol.escalar_minutos.
+    escalada_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Alerta"
