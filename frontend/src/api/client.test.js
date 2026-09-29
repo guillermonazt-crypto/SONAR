@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { request } from "./client";
+import { api, request } from "./client";
 
 const reply = (body, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
 
@@ -23,5 +23,14 @@ describe("request", () => {
   it("sigue lanzando el detalle de los errores", async () => {
     vi.stubGlobal("fetch", vi.fn(() => reply({ detail: "Inicia sesión para continuar." }, 403)));
     await expect(request("privado/")).rejects.toThrow("Inicia sesión para continuar.");
+  });
+
+  it("arma la consulta de alertas omitiendo filtros vacíos", async () => {
+    const fetch = vi.fn(() => reply([]));
+    vi.stubGlobal("fetch", fetch);
+    await api.alerts(true, { plantel: "", tipo: "cpu" });
+    await api.alerts(false, { plantel: 4, tipo: "all", estado: "cerradas" });
+    expect(fetch.mock.calls[0][0]).toBe("/api/alertas/?estado=abiertas&tipo=cpu");
+    expect(fetch.mock.calls[1][0]).toBe("/api/alertas/?limit=100&plantel=4&estado=cerradas");
   });
 });

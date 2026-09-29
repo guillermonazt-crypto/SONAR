@@ -66,6 +66,23 @@ def _reason(level, kind, text):
     return dict(level=level, tipo=kind, text=text)
 
 
+# Motivos guardados antes de que existiera 'tipo' (alertas antiguas): se deduce del texto.
+LEGACY_REASON_TYPES = (
+    ('No responde', 'snmp'), ('Aún no se ha consultado', 'lectura'), ('Última lectura', 'lectura'),
+    ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
+    ('errores nuevos', 'errores'), ('dañados', 'errores'), ('inestables', 'inestables'),
+    ('capacidad', 'saturacion'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
+)
+
+
+def reason_type(reason):
+    """Tipo de un motivo; los antiguos sin 'tipo' se clasifican por su texto."""
+    if reason.get('tipo'):
+        return reason['tipo']
+    text = reason.get('text', '')
+    return next((kind for fragment, kind in LEGACY_REASON_TYPES if fragment in text), 'otro')
+
+
 def _metric(value, warn, crit, name, kind, reasons):
     if value is None:
         return 'ok'

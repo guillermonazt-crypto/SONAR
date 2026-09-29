@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { timeAgo } from "../utils/format";
 import { useAutoRefresh } from "../utils/refresh";
+import { useViewState } from "../utils/viewState";
 import SonarDataTable from "./DataTable";
+import { REASON_TYPES } from "./Status";
+
+const NO_FILTERS = { plantel: "", tipo: "all", estado: "all" };
 
 const blankWindow = { tipo: "switch", objetivo: "", inicio: "", fin: "", motivo: "" };
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
@@ -36,28 +40,38 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
   const [form, setForm] = useState(blankWindow);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Plantel y tipo aplican a abiertas e historial; el estado sólo al historial.
+  const [filters, setFilters] = useViewState("alerts-filters", NO_FILTERS);
+  const scope = { plantel: filters.plantel, tipo: filters.tipo };
+  const filtered = filters.plantel !== "" || filters.tipo !== "all" || filters.estado !== "all";
+
+  const latest = useRef(0);
 
   async function refresh() {
+    // Si cambian los filtros con una consulta en vuelo, sólo cuenta la más reciente.
+    const id = ++latest.current;
     try {
-      const [active, all, current] = await Promise.all([api.alerts(true), api.alerts(), api.maintenances()]);
+      const [active, all, current] = await Promise.all([
+        api.alerts(true, scope),
+        api.alerts(false, { ...scope, estado: filters.estado }),
+        api.maintenances(),
+      ]);
+      if (id !== latest.current) return;
       setOpen(active);
       setHistory(all);
       setWindows(current);
       setError("");
     } catch (exception) {
-      setError(exception.message);
+      if (id === latest.current) setError(exception.message);
     }
   }
   useEffect(() => {
     refresh();
-    if (user.can_edit) {
-      Promise.all([api.list("switches"), api.list("planteles")])
-        .then(([devices, places]) => {
-          setSwitches(devices);
-          setSites(places);
-        })
-        .catch(() => {});
-    }
+  }, [filters.plantel, filters.tipo, filters.estado]);
+  useEffect(() => {
+    // Los planteles sirven al filtro (todos los roles); los switches sólo al formulario de mantenimiento.
+    api.list("planteles").then(setSites).catch(() => {});
+    if (user.can_edit) api.list("switches").then(setSwitches).catch(() => {});
   }, []);
   useAutoRefresh(refresh, !busy);
 
@@ -130,12 +144,38 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
       </div>
       {error && <p role="alert">{error}</p>}
 
+      <div className="filter-bar card alert-filters" role="group" aria-label="Filtrar alertas">
+        <label className="inline-field">
+          Plantel
+          <select aria-label="Filtrar alertas por plantel" value={filters.plantel} onChange={(event) => setFilters({ ...filters, plantel: event.target.value })}>
+            <option value="">Todos</option>
+            {sites.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+          </select>
+        </label>
+        <label className="inline-field">
+          Tipo de alerta
+          <select aria-label="Filtrar alertas por tipo" value={filters.tipo} onChange={(event) => setFilters({ ...filters, tipo: event.target.value })}>
+            <option value="all">Cualquiera</option>
+            {REASON_TYPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        <label className="inline-field">
+          Historial
+          <select aria-label="Filtrar historial por estado" value={filters.estado} onChange={(event) => setFilters({ ...filters, estado: event.target.value })}>
+            <option value="all">Todas</option>
+            <option value="abiertas">Abiertas</option>
+            <option value="cerradas">Cerradas</option>
+          </select>
+        </label>
+        {filtered && <button type="button" className="chip" onClick={() => setFilters(NO_FILTERS)}>Limpiar filtros</button>}
+      </div>
+
       <section className="card">
         <h2>Alertas abiertas</h2>
         {open === null ? (
           <p role="status">Cargando alertas…</p>
         ) : !open.length ? (
-          <p className="empty">No hay alertas abiertas.</p>
+          <p className="empty">{filtered ? "No hay alertas abiertas con estos filtros." : "No hay alertas abiertas."}</p>
         ) : (
           <div className="alert-list">
             {open.map((alert) => (
@@ -235,7 +275,7 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
       <section className="card">
         <h2>Historial</h2>
         <div className="table-scroll sonar-table">
-          <SonarDataTable columns={columns} data={history} noDataComponent="Aún no hay alertas registradas." />
+          <SonarDataTable columns={columns} data={history} noDataComponent={filtered ? "Ninguna alerta coincide con los filtros." : "Aún no hay alertas registradas."} />
         </div>
       </section>
     </>

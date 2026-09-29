@@ -12,3 +12,20 @@ export function StatusBadge({ level }) {
   const info = LEVELS[key];
   return <span className={`status-badge status-${key}`}><span aria-hidden="true">{info.icon}</span> {info.label}</span>;
 }
+
+// Tipos de motivo que asigna switches/health.py (y las condiciones compuestas).
+export const REASON_TYPES = [
+  ["snmp", "Sin respuesta SNMP"],
+  ["lectura", "Lectura atrasada"],
+  ["compuesta", "Condición compuesta"],
+  ["cpu", "CPU"],
+  ["memoria", "Memoria"],
+  ["errores", "Errores de puerto"],
+  ["inestables", "Puertos inestables"],
+  ["saturacion", "Saturación"],
+  ["hardware", "Hardware"],
+  ["poe", "PoE"],
+  ["reinicio", "Reinicio"],
+];
+
+export const hasReason = (reasons, type) => (reasons || []).some((reason) => reason.tipo === type);

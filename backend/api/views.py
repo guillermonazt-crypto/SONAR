@@ -11,7 +11,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
-from switches.health import STALE_MINUTES, assess, port_stats, summarize_sites, thresholds_by_role
+from switches.health import STALE_MINUTES, assess, port_stats, reason_type, summarize_sites, thresholds_by_role
 from switches import backups, discovery
 from switches.models import Alerta, Descubierto, Mantenimiento, Puerto, Respaldo, Switch, UmbralOptico
 from usuarios.audit import differences, registrar, snapshot
@@ -350,10 +350,26 @@ class AlertaViewSet(LimitedListMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = AlertaSerializer
 
     def get_queryset(self):
+        """Filtros: ?estado=abiertas|cerradas, ?plantel=<id>, ?sin_reconocer=1 (y ?tipo= en el listado)."""
         alerts = Alerta.objects.select_related('switch__plantel', 'reconocida_por')
-        if self.request.query_params.get('estado') == 'abiertas':
+        params = self.request.query_params
+        if params.get('estado') == 'abiertas':
             alerts = alerts.filter(fin__isnull=True)
+        elif params.get('estado') == 'cerradas':
+            alerts = alerts.filter(fin__isnull=False)
+        if params.get('plantel', '').isdigit():
+            alerts = alerts.filter(switch__plantel_id=int(params['plantel']))
+        if params.get('sin_reconocer') == '1':
+            alerts = alerts.filter(reconocida_en__isnull=True)
         return alerts
+
+    def filter_queryset(self, queryset):
+        # El tipo vive dentro de 'motivos' (JSON): se filtra en Python, antes del límite.
+        kind = self.request.query_params.get('tipo')
+        if not kind or self.action != 'list':
+            return queryset
+        return [alert for alert in queryset.iterator()
+                if any(reason_type(reason) == kind for reason in alert.motivos or [])]
 
     @action(detail=False, methods=['get'])
     def resumen(self, request):

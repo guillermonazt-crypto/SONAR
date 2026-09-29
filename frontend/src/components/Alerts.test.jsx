@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import Alerts from "./Alerts";
 import AuditLog from "./AuditLog";
 import { api } from "../api/client";
@@ -27,6 +27,22 @@ beforeEach(() => {
 });
 
 describe("Alerts", () => {
+  it("filtra por plantel y tipo, y recuerda los filtros", async () => {
+    const { unmount } = render(<Alerts user={{ can_edit: false }} />);
+    await screen.findAllByText("No responde a SNMP");
+    fireEvent.change(await screen.findByLabelText("Filtrar alertas por plantel"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Filtrar alertas por tipo"), { target: { value: "snmp" } });
+    await waitFor(() => expect(api.alerts).toHaveBeenLastCalledWith(false, { plantel: "1", tipo: "snmp", estado: "all" }));
+    expect(api.alerts).toHaveBeenCalledWith(true, { plantel: "1", tipo: "snmp" });
+    unmount();
+    api.alerts.mockClear();
+    render(<Alerts user={{ can_edit: false }} />);
+    await waitFor(() => expect(api.alerts).toHaveBeenCalledWith(true, { plantel: "1", tipo: "snmp" }));
+    expect(screen.getByLabelText("Filtrar alertas por tipo")).toHaveValue("snmp");
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+    await waitFor(() => expect(api.alerts).toHaveBeenLastCalledWith(false, { plantel: "", tipo: "all", estado: "all" }));
+  });
+
   it("el editor reconoce una alerta con nota", async () => {
     api.acknowledge.mockResolvedValue({});
     render(<Alerts user={{ can_edit: true }} />);
@@ -47,9 +63,10 @@ describe("Alerts", () => {
     api.saveMaintenance.mockResolvedValue({});
     render(<Alerts user={{ can_edit: true }} />);
     await screen.findAllByText("No responde a SNMP");
-    fireEvent.change(screen.getByLabelText("Aplica a"), { target: { value: "plantel" } });
-    await screen.findByRole("option", { name: "Apan" });
-    fireEvent.change(screen.getByLabelText("Plantel"), { target: { value: "1" } });
+    const form = screen.getByRole("button", { name: "Guardar ventana" }).closest("form");
+    fireEvent.change(within(form).getByLabelText("Aplica a"), { target: { value: "plantel" } });
+    await within(form).findByRole("option", { name: "Apan" });
+    fireEvent.change(within(form).getByLabelText("Plantel"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Inicio"), { target: { value: "2026-10-01T22:00" } });
     fireEvent.change(screen.getByLabelText("Fin"), { target: { value: "2026-10-02T02:00" } });
     fireEvent.change(screen.getByLabelText("Motivo"), { target: { value: "Cambio de UPS" } });

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from planteles.models import Division, Plantel
-from switches.health import assess
+from switches.health import assess, reason_type
 from switches.models import Alerta, Descubierto, Mantenimiento, Respaldo, Switch, Puerto
 from usuarios.models import Bitacora
 
@@ -75,10 +75,14 @@ def switch_brief(switch):
 
 class AlertaSerializer(serializers.ModelSerializer):
     switch = serializers.SerializerMethodField()
+    motivos = serializers.SerializerMethodField()
     reconocida_por = serializers.CharField(source='reconocida_por.username', read_only=True, default=None)
 
     def get_switch(self, alert):
         return switch_brief(alert.switch)
+
+    def get_motivos(self, alert):
+        return [dict(reason, tipo=reason_type(reason)) for reason in alert.motivos or []]
 
     class Meta:
         model = Alerta

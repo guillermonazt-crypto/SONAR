@@ -64,7 +64,14 @@ export const api = {
   summary: (refresh = false) => request(`resumen/${refresh ? "?refresh=1" : ""}`),
   optics: (refresh = false) => request(`opticas/${refresh ? "?refresh=1" : ""}`),
   search: (query) => request(`buscar/?q=${encodeURIComponent(query)}`),
-  alerts: (open = false) => request(`alertas/${open ? "?estado=abiertas" : "?limit=100"}`),
+  // filters: {plantel, tipo, estado: "abiertas" | "cerradas"}; los vacíos se omiten.
+  alerts: (open = false, filters = {}) => {
+    const params = new URLSearchParams(open ? { estado: "abiertas" } : { limit: "100" });
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== "" && value !== "all") params.set(key, value);
+    });
+    return request(`alertas/?${params}`);
+  },
   alertSummary: () => request("alertas/resumen/"),
   acknowledge: (id, nota) => request(`alertas/${id}/reconocer/`, { method: "POST", data: { nota } }),
   maintenances: () => request("mantenimientos/?vigentes=1"),

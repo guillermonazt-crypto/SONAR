@@ -104,6 +104,11 @@ el peor estado de sus equipos (mismas reglas de `health.py`), cuántos responden
 puertos activos, alertas abiertas y puertos con errores. Al elegir un plantel se filtra
 el análisis por equipo. Los planteles sin equipos aparecen como "Sin equipos".
 
+En Resumen y en Alertas los filtros se combinan (plantel, estado de salud y tipo de
+problema: SNMP, CPU, memoria, errores, inestables, saturación, hardware, PoE…) y se
+recuerdan al recargar, igual que la pestaña y el switch abiertos. El API acepta
+`/api/alertas/?plantel=<id>&tipo=<tipo>&estado=abiertas|cerradas&sin_reconocer=1`.
+
 Los errores de puerto se evalúan por ciclo (`errores_nuevos`, `ultimo_error`), no
 por el contador acumulado desde el arranque del equipo.
 

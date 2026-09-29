@@ -1,3 +1,5 @@
+import { useCallback, useState } from "react";
+
 const KEY = "sonar-view";
 
 // Lo que el usuario estaba viendo (pestaña, switch, puerto, carpetas) sobrevive
@@ -31,4 +33,28 @@ export function clearView() {
   } catch {
     // Nada que limpiar.
   }
+}
+
+/**
+ * useState que se recuerda con el resto de la vista (filtros, selecciones).
+ * Los valores guardados se combinan con `initial`, así un filtro nuevo no rompe
+ * lo que quedó de una versión anterior.
+ */
+export function useViewState(key, initial) {
+  const [value, setValue] = useState(() => {
+    const saved = loadView(key);
+    if (saved === null) return initial;
+    const isObject = (item) => item && typeof item === "object" && !Array.isArray(item);
+    return isObject(initial) && isObject(saved) ? { ...initial, ...saved } : saved;
+  });
+  const update = useCallback(
+    (next) =>
+      setValue((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        saveView(key, resolved);
+        return resolved;
+      }),
+    [key],
+  );
+  return [value, update];
 }

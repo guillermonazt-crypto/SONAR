@@ -5,7 +5,8 @@ import { formatRate, formatUptime, timeAgo } from "../utils/format";
 import { useAutoRefresh } from "../utils/refresh";
 import { cssVar, useTheme } from "../utils/theme";
 import SiteBoard from "./SiteBoard";
-import { LEVELS, StatusBadge } from "./Status";
+import { LEVELS, REASON_TYPES, StatusBadge, hasReason } from "./Status";
+import { useViewState } from "../utils/viewState";
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, LineController, Tooltip, Legend);
 
@@ -174,8 +175,9 @@ export default function Overview({ onOpenPorts }) {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [zabbix, setZabbix] = useState(null);
-  const [filter, setFilter] = useState("all");
-  const [site, setSite] = useState(null);
+  // Plantel, nivel y tipo de problema se recuerdan con el resto de la vista.
+  const [filters, setFilters] = useViewState("overview-filters", { level: "all", site: null, type: "all" });
+  const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
   const zabbixAt = useRef(0);
   async function refresh(force = false, auto = false) {
     try {
@@ -206,9 +208,13 @@ export default function Overview({ onOpenPorts }) {
   const countLevel = (level) => devices.filter((device) => device.estado === level).length;
   const atRisk = devices.filter((device) => device.estado !== "ok");
   const siteBoard = summary?.planteles || [];
-  const siteName = siteBoard.find((item) => item.id === site)?.nombre;
-  const inSite = siteName ? devices.filter((device) => device.plantel === site) : devices;
-  const visible = filter === "all" ? inSite : inSite.filter((device) => device.estado === filter);
+  const siteName = siteBoard.find((item) => item.id === filters.site)?.nombre;
+  const inSite = siteName ? devices.filter((device) => device.plantel === filters.site) : devices;
+  const typeCount = (type) => inSite.filter((device) => hasReason(device.motivos, type)).length;
+  const byType = filters.type === "all" ? inSite : inSite.filter((device) => hasReason(device.motivos, filters.type));
+  const visible = filters.level === "all" ? byType : byType.filter((device) => device.estado === filters.level);
+  const filtered = Boolean(siteName) || filters.type !== "all" || filters.level !== "all";
+  const siteOptions = siteBoard.filter((item) => item.equipos || item.inactivos).sort((a, b) => a.nombre.localeCompare(b.nombre));
   const sites = groupBySite(visible);
   const totals = devices.reduce((sum, device) => {
     const stats = device.puertos || {};
@@ -253,7 +259,7 @@ export default function Overview({ onOpenPorts }) {
         </article>
       </div>
 
-      <SiteBoard sites={siteBoard} selected={siteName ? site : null} onSelect={setSite} />
+      <SiteBoard sites={siteBoard} selected={siteName ? filters.site : null} onSelect={(id) => setFilter("site", id)} />
 
       <section className="card risk-panel">
         <div className="section-title">
@@ -294,16 +300,32 @@ export default function Overview({ onOpenPorts }) {
           <div>
             <span className="eyebrow">ANÁLISIS</span>
             <h2>Estado por equipo</h2>
-            {siteName && (
-              <button type="button" className="chip" onClick={() => setSite(null)} aria-label={`Quitar filtro de plantel ${siteName}`}>
-                Plantel: {siteName} ✕
+          </div>
+          <div className="filter-bar">
+            <label className="inline-field">
+              Plantel
+              <select value={siteName ? filters.site : ""} onChange={(event) => setFilter("site", event.target.value ? Number(event.target.value) : null)}>
+                <option value="">Todos</option>
+                {siteOptions.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+              </select>
+            </label>
+            <label className="inline-field">
+              Problema
+              <select value={filters.type} onChange={(event) => setFilter("type", event.target.value)}>
+                <option value="all">Cualquiera</option>
+                {REASON_TYPES.map(([id, label]) => <option key={id} value={id}>{label} ({typeCount(id)})</option>)}
+              </select>
+            </label>
+            {filtered && (
+              <button type="button" className="chip" onClick={() => setFilters({ level: "all", site: null, type: "all" })}>
+                Limpiar filtros
               </button>
             )}
           </div>
           <div className="filter-row" role="group" aria-label="Filtrar equipos por estado">
             {FILTERS.map(([id, label]) => (
-              <button key={id} type="button" className={filter === id ? "active" : ""} aria-pressed={filter === id} onClick={() => setFilter(id)}>
-                {label} ({id === "all" ? inSite.length : inSite.filter((device) => device.estado === id).length})
+              <button key={id} type="button" className={filters.level === id ? "active" : ""} aria-pressed={filters.level === id} onClick={() => setFilter("level", id)}>
+                {label} ({id === "all" ? byType.length : byType.filter((device) => device.estado === id).length})
               </button>
             ))}
           </div>
@@ -332,7 +354,7 @@ export default function Overview({ onOpenPorts }) {
             </div>
           );
         })}
-        {summary && !visible.length && <p className="empty">No hay equipos en este estado.</p>}
+        {summary && !visible.length && <p className="empty">{filtered ? "Ningún equipo coincide con los filtros." : "No hay equipos en este estado."}</p>}
       </section>
 
       <section className="card historical native-monitor">

@@ -72,8 +72,35 @@ describe("Overview", () => {
     expect(within(analysis).getByText("SW-OK")).toBeInTheDocument();
     expect(within(analysis).queryByText("SW-CAIDO")).not.toBeInTheDocument();
     expect(within(analysis).getByRole("button", { name: "Todos (1)" })).toBeInTheDocument();
-    fireEvent.click(within(analysis).getByRole("button", { name: /Quitar filtro de plantel/ }));
+    fireEvent.click(within(analysis).getByRole("button", { name: "Limpiar filtros" }));
     expect(within(analysis).getByText("SW-CAIDO")).toBeInTheDocument();
+  });
+
+  it("combina filtros por plantel y tipo de problema y los recuerda al volver", async () => {
+    api.summary.mockResolvedValue({
+      generado: now, ultima_lectura: now, worker_atrasado: false,
+      umbrales: { core: limits, distribution: limits, access: limits },
+      planteles: [],
+      switches: [
+        device(1, "SW-CPU", "Apan", "warning", [{ level: "warning", tipo: "cpu", text: "CPU en 75% (≥ 70%)" }], 1),
+        device(2, "SW-SNMP", "Apan", "critical", [{ level: "critical", tipo: "snmp", text: "No responde a SNMP" }], 1),
+        device(3, "SW-TULA", "Tulancingo", "warning", [{ level: "warning", tipo: "cpu", text: "CPU en 80% (≥ 70%)" }], 2),
+      ],
+    });
+    api.zabbix.mockResolvedValue({ configured: false, hosts: [] });
+    const { unmount } = render(<Overview />);
+    const analysis = (await screen.findByRole("heading", { name: "Estado por equipo" })).closest("section");
+    fireEvent.change(within(analysis).getByLabelText("Problema"), { target: { value: "cpu" } });
+    expect(within(analysis).getByText("SW-CPU")).toBeInTheDocument();
+    expect(within(analysis).getByText("SW-TULA")).toBeInTheDocument();
+    expect(within(analysis).queryByText("SW-SNMP")).not.toBeInTheDocument();
+    unmount();
+    // Al volver a la pestaña el filtro sigue aplicado (sessionStorage).
+    render(<Overview />);
+    const again = (await screen.findByRole("heading", { name: "Estado por equipo" })).closest("section");
+    expect(await within(again).findByText("SW-CPU")).toBeInTheDocument();
+    expect(within(again).queryByText("SW-SNMP")).not.toBeInTheDocument();
+    expect(within(again).getByLabelText("Problema")).toHaveValue("cpu");
   });
 
   it("avisa cuando el worker está atrasado", async () => {

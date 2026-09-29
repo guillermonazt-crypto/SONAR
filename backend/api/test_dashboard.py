@@ -61,3 +61,33 @@ class SiteDashboardTests(TestCase):
                    for level in ('ok', 'warning', 'ok')]
         (site,) = summarize_sites([self.apan], devices)
         self.assertEqual((site['estado'], site['niveles']['warning'], site['disponibilidad']), ('warning', 1, 100.0))
+
+
+class AlertFilterTests(TestCase):
+    def setUp(self):
+        self.reader = get_user_model().objects.create_user(username='reader', password='test-password', rol='lector')
+        division = Division.objects.create(nombre='Escuelas')
+        apan = Plantel.objects.create(nombre='Apan', division=division)
+        tula = Plantel.objects.create(nombre='Tula', division=division)
+        self.apan_sw = Switch.objects.create(nombre='SW-APAN', hostname='192.0.2.1', plantel=apan)
+        self.tula_sw = Switch.objects.create(nombre='SW-TULA', hostname='192.0.2.2', plantel=tula)
+        now = timezone.now()
+        # Alerta antigua: sin 'tipo' en sus motivos.
+        self.legacy = Alerta.objects.create(switch=self.apan_sw, inicio=now, fin=now,
+                                            motivos=[dict(level='critical', text='No responde a SNMP')])
+        self.cpu = Alerta.objects.create(switch=self.tula_sw, inicio=now,
+                                         motivos=[dict(level='critical', tipo='cpu', text='CPU en 95% (≥ 90%)')])
+        self.plantel = apan
+
+    def test_filters_by_site_type_and_state(self):
+        self.client.force_login(self.reader)
+        ids = lambda **params: [a['id'] for a in self.client.get('/api/alertas/', params).json()]
+        self.assertEqual(set(ids()), {self.legacy.pk, self.cpu.pk})
+        self.assertEqual(ids(plantel=self.plantel.pk), [self.legacy.pk])
+        self.assertEqual(ids(tipo='snmp'), [self.legacy.pk])
+        self.assertEqual(ids(tipo='cpu', estado='abiertas'), [self.cpu.pk])
+        self.assertEqual(ids(estado='cerradas'), [self.legacy.pk])
+        self.assertEqual(ids(sin_reconocer=1, tipo='memoria'), [])
+        # Los motivos antiguos se entregan ya clasificados.
+        legacy = self.client.get(f'/api/alertas/{self.legacy.pk}/').json()
+        self.assertEqual(legacy['motivos'][0]['tipo'], 'snmp')
