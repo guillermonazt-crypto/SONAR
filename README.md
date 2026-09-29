@@ -81,8 +81,11 @@ y descarta interfaces lógicas como VLAN, Loopback, Stack y Port-channel.
 
 Al seleccionar un puerto se muestran descripción, estado, errores, IP/MAC, VLAN,
 Voice VLAN, MAC del teléfono y tráfico de entrada/salida. La velocidad se calcula
-en memoria entre dos lecturas consecutivas y no se guarda como historial en Django;
-el panel actualiza la lectura cada tres minutos.
+entre dos lecturas consecutivas del worker y no se guarda como historial en Django.
+
+Las vistas se refrescan solas: el selector del encabezado permite cada 3 s (por
+defecto), 5 s, 30 s o desactivarlo. El refresco se pausa con la pestaña oculta y
+el switch, puerto, pestaña y carpetas abiertas se conservan al recargar la página.
 
 Los datos de voz, CDP, VLAN y DHCP snooping se muestran sólo cuando el equipo los
 publica. Los OID específicos de un fabricante son enriquecimientos opcionales;
@@ -103,6 +106,41 @@ El worker envía una alerta cuando un switch pasa a rojo y otra cuando se recupe
 con un cooldown (`ALERT_COOLDOWN_MINUTES`). Canales opcionales en `.env`: correo
 (`ALERT_EMAIL_TO` + `EMAIL_*`), Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
 y webhook de Teams/Slack/Google Chat (`ALERT_WEBHOOK_URL`).
+
+La salud también considera el hardware (fuentes, ventiladores y temperatura por
+CISCO-ENVMON-MIB), el PoE al 90 % o más del presupuesto, los puertos inestables
+(4 o más cambios up/down en 1 h) y los puertos al 90 % o más de su capacidad.
+
+## Buscador, ópticas y centro de alertas
+
+- **Buscador global** (barra de pestañas): MAC en cualquier formato, IP completa o
+  parcial, MAC del teléfono, descripción de puerto o switch. Abre el puerto encontrado.
+- **Ópticas**: RX/TX, temperatura y degradación de cada SFP (`/api/opticas/`, lee
+  InfluxDB con caché de 30 s). Umbrales en el admin, **Umbrales ópticos**.
+- **Alertas**: cada episodio en rojo queda registrado; un editor lo reconoce con una
+  nota. Las **ventanas de mantenimiento** (por switch o plantel) registran las alertas
+  sin notificarlas.
+- **Bitácora de cambios** (Inventario, sólo editores): altas, ediciones, bajas,
+  reconocimientos, respaldos e inicios de sesión.
+- **Reportes**: inventario, disponibilidad, puertos sin uso, inestables, saturados y
+  con errores, PoE, hardware, ópticas y topología CDP. En pantalla, CSV o impresos.
+
+El API responde `304 Not Modified` (ETag) cuando nada cambió, así el refresco cada
+3 s casi no transfiere datos.
+
+## Descubrimiento y respaldos (opcionales)
+
+Ambos están apagados por defecto; las variables están en `.env.example`.
+
+- `DISCOVERY_ENABLED=true` propone equipos fuera del inventario: vecinos CDP y, con
+  `DISCOVERY_SUBNETS`, un barrido SNMP limitado por `DISCOVERY_MAX_HOSTS`. Aparecen en
+  Inventario → **Equipos descubiertos**; nunca se agregan solos. A mano:
+  `python backend/manage.py descubrir`.
+- `BACKUP_ENABLED=true` respalda `show running-config` por SSH cada
+  `BACKUP_INTERVAL_HOURS` (requiere `pip install paramiko` y `BACKUP_SSH_USER`).
+  Sólo se guarda una versión cuando la configuración cambia; en Inventario →
+  **Respaldos** se ven las diferencias. Las contraseñas se ocultan salvo para
+  administradores. A mano: `python backend/manage.py respaldar_configs`.
 
 ## Producción con Docker
 
