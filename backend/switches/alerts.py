@@ -16,7 +16,7 @@ from django.core.mail import send_mail
 from django.utils import timezone
 
 from .health import assess, port_stats, thresholds_by_role
-from .models import Switch
+from .models import Alerta, Mantenimiento, Switch
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +28,9 @@ def cooldown():
 def evaluate(switch_id, now=None):
     """Actualiza el nivel de alerta y devuelve el mensaje a enviar, o None.
 
-    Avisa al pasar a riesgo (rojo) y al recuperarse. El cooldown evita
-    repetir avisos cuando un equipo oscila entre estados.
+    Avisa al pasar a riesgo (rojo) y al recuperarse. Cada episodio queda como
+    Alerta (centro de alertas). El cooldown evita repetir avisos cuando un
+    equipo oscila; en una ventana de mantenimiento se registra sin notificar.
     """
     now = now or timezone.now()
     switch = Switch.objects.select_related('plantel').filter(pk=switch_id).first()
@@ -39,18 +40,32 @@ def evaluate(switch_id, now=None):
                             thresholds_by_role()[switch.rol], now)
     was_critical = switch.nivel_alerta == 'critical'
     is_critical = level == 'critical'
+    open_alert = Alerta.objects.filter(switch=switch, fin__isnull=True).first()
+    critical_reasons = [r for r in reasons if r['level'] == 'critical']
     if was_critical == is_critical:
         if switch.nivel_alerta != level:
             Switch.objects.filter(pk=switch.pk).update(nivel_alerta=level)
+        if is_critical and open_alert and open_alert.motivos != critical_reasons:
+            Alerta.objects.filter(pk=open_alert.pk).update(motivos=critical_reasons)
         return None
+    maintenance = Mantenimiento.por_switch([switch], now).get(switch.pk)
     recent = switch.alerta_enviada and now - switch.alerta_enviada < cooldown()
+    if is_critical:
+        notify = not recent and maintenance is None
+        Alerta.objects.create(switch=switch, motivos=critical_reasons, inicio=now,
+                              notificada=notify, en_mantenimiento=maintenance is not None)
+    else:
+        if open_alert:
+            Alerta.objects.filter(pk=open_alert.pk).update(fin=now)
+        # Sólo se avisa la recuperación de un episodio que sí se notificó.
+        notify = not recent and maintenance is None and (open_alert is None or open_alert.notificada)
     Switch.objects.filter(pk=switch.pk).update(nivel_alerta=level,
-                                               alerta_enviada=switch.alerta_enviada if recent else now)
-    if recent:
+                                               alerta_enviada=now if notify else switch.alerta_enviada)
+    if not notify:
         return None
     where = f'{switch.nombre} ({switch.hostname}) · {switch.plantel.nombre}'
     if is_critical:
-        detail = '; '.join(r['text'] for r in reasons if r['level'] == 'critical')
+        detail = '; '.join(r['text'] for r in critical_reasons)
         return f'🔴 SONAR: {where} en riesgo. {detail}'
     return f'🟢 SONAR: {where} se recuperó.'
 

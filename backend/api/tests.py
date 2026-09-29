@@ -58,6 +58,191 @@ class ApiTests(TestCase):
         self.assertEqual(self.client.get(f'/api/puertos/{port.pk}/historial/').status_code, 200)
         self.assertEqual(self.client.get('/api/puertos/9999/historial/').status_code, 404)
 
+    def test_global_search_by_mac_ip_and_description(self):
+        switch = Switch.objects.create(nombre='SW-APAN', hostname='192.0.2.10', plantel=self.plantel)
+        access = Puerto.objects.create(switch=switch, nombre='Gi1/0/5', indice=5, vlan=20, descripcion='Recepción',
+                                       ip_equipo='10.1.1.10, 10.1.1.11', mac_equipo='00:50:56:ab:cd:ef',
+                                       mac_telefono='00:11:22:33:44:55')
+        Puerto.objects.create(switch=switch, nombre='Gi1/0/48', indice=48, es_trunk=True,
+                              mac_equipo='00:50:56:ab:cd:ef')
+        Puerto.objects.create(switch=switch, nombre='Vlan20', indice=900, es_fisico=False, ip_equipo='10.1.1.10')
+        self.assertEqual(self.client.get('/api/buscar/?q=10.1.1.10').status_code, 403)
+        self.client.force_login(self.reader)
+        search = lambda q: self.client.get('/api/buscar/', {'q': q}).json()
+        # Cualquier formato de MAC; el puerto de acceso va antes que el troncal.
+        for query in ('0050.56ab.cdef', '00-50-56-AB-CD-EF', '00:50:56:ab'):
+            ports = search(query)['puertos']
+            self.assertEqual([p['nombre'] for p in ports], ['Gi1/0/5', 'Gi1/0/48'], query)
+        result = search('10.1.1.11')['puertos'][0]
+        self.assertEqual((result['id'], result['coincide'], result['valor'], result['exacto']), (access.pk, 'ip', '10.1.1.11', True))
+        self.assertEqual(result['switch']['plantel_nombre'], 'Lab')
+        self.assertEqual(search('10.1.1.1')['puertos'][0]['exacto'], False)
+        self.assertEqual(search('1122.3344')['puertos'][0]['coincide'], 'telefono')
+        self.assertEqual(search('recep')['puertos'][0]['coincide'], 'descripcion')
+        self.assertEqual(search('192.0.2')['switches'][0]['nombre'], 'SW-APAN')
+        self.assertEqual(search('10')['puertos'], [])
+
+    def test_switch_list_includes_health(self):
+        from django.utils import timezone
+        down = Switch.objects.create(nombre='SW-DOWN', hostname='192.0.2.20', plantel=self.plantel,
+                                     lectura_correcta=False, ultima_consulta=timezone.now())
+        Switch.objects.create(nombre='SW-OK', hostname='192.0.2.21', plantel=self.plantel,
+                              lectura_correcta=True, ultima_consulta=timezone.now(), cpu_5m=10)
+        self.client.force_login(self.reader)
+        items = {item['nombre']: item for item in self.client.get('/api/switches/').json()}
+        self.assertEqual(items['SW-DOWN']['estado'], 'critical')
+        self.assertEqual(items['SW-DOWN']['motivos'][0]['text'], 'No responde a SNMP')
+        self.assertEqual((items['SW-OK']['estado'], items['SW-OK']['motivos']), ('ok', []))
+        self.assertEqual(self.client.get(f'/api/switches/{down.pk}/').json()['estado'], 'critical')
+
+    def test_optics_levels_and_links_ports(self):
+        from unittest import mock
+        from django.core.cache import cache
+        from switches.models import UmbralOptico
+        cache.clear()
+        switch = Switch.objects.create(nombre='SW-CORE', hostname='192.0.2.30', plantel=self.plantel)
+        port = Puerto.objects.create(switch=switch, nombre='TenGigabitEthernet1/1/1', indice=101)
+        base = dict(time='2026-01-01T00:00:00+00:00', atenuacion=None, estado='ok')
+        readings = [
+            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/1', rx_dbm=-3.1, tx_dbm=-2.0, temperatura=35.0, rx_max_24h=-3.0),
+            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/2', rx_dbm=-21.4, tx_dbm=-2.2, temperatura=36.0, rx_max_24h=-8.0),
+            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/3', rx_dbm=-6.0, tx_dbm=-2.1, temperatura=68.0, rx_max_24h=-6.0),
+            dict(base, device='OTRO', interfaz='Te1/1/1', rx_dbm=None, tx_dbm=-10.0, temperatura=None, rx_max_24h=None, estado='alerta'),
+        ]
+        self.assertEqual(self.client.get('/api/opticas/').status_code, 403)
+        self.client.force_login(self.reader)
+        with mock.patch('api.views.history.optics_snapshot', return_value=readings):
+            data = self.client.get('/api/opticas/').json()
+        levels = {item['interfaz']: (item['nivel'], [r['text'] for r in item['motivos']]) for item in data['transceptores']}
+        self.assertEqual(levels['TenGigabitEthernet1/1/1'], ('ok', []))
+        self.assertEqual(levels['TenGigabitEthernet1/1/2'][0], 'critical')
+        self.assertIn('RX cayó 13.4 dB en 24 h', levels['TenGigabitEthernet1/1/2'][1])
+        self.assertEqual(levels['TenGigabitEthernet1/1/3'], ('warning', ['Temperatura 68 °C (≥ 65)']))
+        self.assertEqual(levels['Te1/1/1'][0], 'warning')
+        self.assertEqual(data['transceptores'][0]['interfaz'], 'TenGigabitEthernet1/1/2')
+        linked = next(item for item in data['transceptores'] if item['interfaz'] == 'TenGigabitEthernet1/1/1')
+        self.assertEqual((linked['puerto_id'], linked['switch']['nombre']), (port.pk, 'SW-CORE'))
+        self.assertIsNone(next(item for item in data['transceptores'] if item['device'] == 'OTRO')['switch'])
+        # Umbrales editables: bajar la temperatura de atención cambia el nivel.
+        UmbralOptico.objects.create(temp_atencion=30)
+        with mock.patch('api.views.history.optics_snapshot', return_value=readings):
+            data = self.client.get('/api/opticas/?refresh=1').json()
+        self.assertEqual(data['umbrales']['temp_atencion'], 30)
+        with mock.patch('api.views.history.optics_snapshot', side_effect=OSError('sin influx')):
+            data = self.client.get('/api/opticas/?refresh=1').json()
+        self.assertEqual(data['transceptores'], [])
+        self.assertIn('sin influx', data['detalle'])
+
+    def test_unchanged_api_responses_return_304(self):
+        Switch.objects.create(nombre='SW', hostname='192.0.2.40', plantel=self.plantel)
+        self.client.force_login(self.reader)
+        first = self.client.get('/api/switches/')
+        self.assertEqual(first.status_code, 200)
+        self.assertIn('no-cache', first['Cache-Control'])
+        again = self.client.get('/api/switches/', HTTP_IF_NONE_MATCH=first['ETag'])
+        self.assertEqual((again.status_code, again.content), (304, b''))
+        Switch.objects.filter(nombre='SW').update(cpu_5m=50)
+        self.assertEqual(self.client.get('/api/switches/', HTTP_IF_NONE_MATCH=first['ETag']).status_code, 200)
+
+    def test_alert_center_maintenance_and_audit(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        from django.utils import timezone
+        from switches import alerts
+        from switches.models import Alerta
+        from usuarios.models import Bitacora
+        now = timezone.now()
+        down = Switch.objects.create(nombre='SW-DOWN', hostname='192.0.2.50', plantel=self.plantel,
+                                     lectura_correcta=False, ultima_consulta=now)
+        # Episodio notificado: se abre la alerta y se avisa.
+        self.assertIn('SW-DOWN', alerts.evaluate(down.pk, now))
+        alert = Alerta.objects.get()
+        self.assertTrue(alert.notificada)
+        self.assertEqual(alert.motivos[0]['text'], 'No responde a SNMP')
+        # El lector ve las alertas pero no puede reconocerlas.
+        self.client.force_login(self.reader)
+        self.assertEqual(self.client.get('/api/alertas/resumen/').json(), dict(abiertas=1, sin_reconocer=1))
+        self.assertEqual(self.client.post(f'/api/alertas/{alert.pk}/reconocer/', {'nota': 'x'}).status_code, 403)
+        self.assertEqual(self.client.get('/api/bitacora/').status_code, 403)
+        self.client.force_login(self.editor)
+        response = self.client.post(f'/api/alertas/{alert.pk}/reconocer/', {'nota': 'Cuadrilla en camino'})
+        self.assertEqual(response.json()['reconocida_por'], 'editor')
+        self.assertEqual(self.client.get('/api/alertas/resumen/').json(), dict(abiertas=1, sin_reconocer=0))
+        self.assertEqual(self.client.get(f'/api/alertas/{alert.pk}/').json()['nota'], 'Cuadrilla en camino')
+        # Se recupera: la alerta se cierra.
+        Switch.objects.filter(pk=down.pk).update(lectura_correcta=True)
+        alerts.evaluate(down.pk, now + timedelta(hours=1))
+        self.assertIsNotNone(Alerta.objects.get().fin)
+        self.assertEqual(self.client.get('/api/alertas/?estado=abiertas').json(), [])
+        # Ventana de mantenimiento del plantel: se registra pero no se notifica.
+        window = dict(plantel=self.plantel.pk, inicio=(now + timedelta(hours=1)).isoformat(),
+                      fin=(now + timedelta(hours=5)).isoformat(), motivo='Cambio de UPS')
+        self.assertEqual(self.client.post('/api/mantenimientos/', dict(window, switch=down.pk)).status_code, 400)
+        self.assertEqual(self.client.post('/api/mantenimientos/', dict(window, fin=window['inicio'])).status_code, 400)
+        created = self.client.post('/api/mantenimientos/', window)
+        self.assertEqual(created.status_code, 201, created.content)
+        Switch.objects.filter(pk=down.pk).update(lectura_correcta=False, nivel_alerta='ok')
+        self.assertIsNone(alerts.evaluate(down.pk, now + timedelta(hours=2)))
+        self.assertTrue(Alerta.objects.filter(fin__isnull=True).get().en_mantenimiento)
+        with patch('api.views.timezone.now', return_value=now + timedelta(hours=2)):
+            listed = {s['nombre']: s for s in self.client.get('/api/switches/').json()}
+        self.assertEqual(listed['SW-DOWN']['mantenimiento']['motivo'], 'Cambio de UPS')
+        # Bitácora: edición con los campos que cambiaron.
+        self.client.patch(f'/api/switches/{down.pk}/', data='{"nombre":"SW-CAIDO"}', content_type='application/json')
+        entries = self.client.get('/api/bitacora/').json()
+        self.assertEqual(entries[0]['descripcion'], 'Editó switch SW-CAIDO (192.0.2.50)')
+        self.assertEqual(entries[0]['cambios'], {'nombre': ['SW-DOWN', 'SW-CAIDO']})
+        self.assertEqual({e['accion'] for e in entries}, {'editar', 'crear', 'reconocer'})
+        self.assertEqual(self.client.delete(f"/api/mantenimientos/{created.json()['id']}/").status_code, 204)
+        self.assertTrue(Bitacora.objects.filter(accion='eliminar', objeto='mantenimiento').exists())
+
+    def test_reports_json_and_csv(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from switches.models import Alerta, EventoPuerto
+        now = timezone.now()
+        core = Switch.objects.create(nombre='SW-CORE', hostname='192.0.2.60', plantel=self.plantel, rol='core',
+                                     poe_presupuesto_w=370, poe_consumo_w=333,
+                                     hardware=[dict(tipo='fuente', nombre='PS1', estado='critical', valor=None)])
+        access = Switch.objects.create(nombre='SW-ACC', hostname='192.0.2.61', plantel=self.plantel)
+        Puerto.objects.create(switch=core, nombre='Te1/1/1', indice=1, es_trunk=True, vecino_nombre='SW-ACC.uaeh.mx',
+                              vecino_puerto='Gi1/1/1', vecino_ip='192.0.2.61', estado_operativo='up', uso_pct=95.5,
+                              velocidad_mbps=10000)
+        Puerto.objects.create(switch=core, nombre='Te1/1/2', indice=2, vecino_nombre='AP-01', estado_operativo='up')
+        unused = Puerto.objects.create(switch=access, nombre='Gi1/0/7', indice=7, estado_operativo='down',
+                                       ultimo_activo=now - timedelta(days=45))
+        Puerto.objects.create(switch=access, nombre='Gi1/0/8', indice=8, estado_operativo='down', ultimo_activo=now - timedelta(days=2))
+        flapping = Puerto.objects.create(switch=access, nombre='Gi1/0/9', indice=9, estado_operativo='up')
+        for minute in range(5):
+            EventoPuerto.objects.create(puerto=flapping, estado='up' if minute % 2 else 'down', momento=now - timedelta(minutes=minute))
+        Alerta.objects.create(switch=access, motivos=[dict(level='critical', text='No responde a SNMP')],
+                              inicio=now - timedelta(hours=3), fin=now - timedelta(hours=1))
+        self.assertEqual(self.client.get('/api/reportes/inventario/').status_code, 403)
+        self.client.force_login(self.reader)
+        get = lambda kind, **params: self.client.get(f'/api/reportes/{kind}/', params).json()
+        self.assertEqual(self.client.get('/api/reportes/nada/').status_code, 404)
+        self.assertEqual({r['switch'] for r in get('inventario')['filas']}, {'SW-CORE', 'SW-ACC'})
+        availability = {r['switch']: r for r in get('disponibilidad', dias=1)['filas']}
+        self.assertEqual(availability['SW-ACC']['minutos_caido'], 120)
+        self.assertEqual(availability['SW-ACC']['disponibilidad'], round(100 - 120 * 100 / 1440, 3))
+        self.assertEqual(availability['SW-CORE']['disponibilidad'], 100)
+        self.assertEqual([r['puerto'] for r in get('puertos-sin-uso', dias=30)['filas']], ['Gi1/0/7'])
+        self.assertEqual(get('puertos-sin-uso', dias=30)['filas'][0]['puerto_id'], unused.pk)
+        self.assertEqual(get('puertos-inestables')['filas'][0]['cambios'], 5)
+        self.assertEqual(get('puertos-saturados')['filas'][0]['uso_pct'], 95.5)
+        self.assertEqual(get('poe')['filas'][0]['uso_pct'], 90.0)
+        self.assertEqual(get('hardware')['filas'][0]['estado'], 'critical')
+        topology = {r['vecino']: r for r in get('topologia')['filas']}
+        self.assertEqual((topology['SW-ACC.uaeh.mx']['vecino_id'], topology['AP-01']['vecino_id']), (access.pk, None))
+        csv = self.client.get('/api/reportes/puertos-sin-uso/', dict(formato='csv'))
+        self.assertIn('attachment; filename="sonar-puertos-sin-uso-', csv['Content-Disposition'])
+        lines = csv.content.decode('utf-8-sig').splitlines()
+        self.assertEqual(lines[0], 'Switch,Plantel,Puerto,Descripción,VLAN,Sin enlace desde,Días')
+        self.assertTrue(lines[1].startswith('SW-ACC,Lab,Gi1/0/7,'))
+        Puerto.objects.filter(pk=unused.pk).update(descripcion='=HYPERLINK("http://x")')
+        csv = self.client.get('/api/reportes/puertos-sin-uso/', dict(formato='csv')).content.decode('utf-8-sig')
+        self.assertIn('"\'=HYPERLINK(""http://x"")"', csv)
+
     def test_flux_string_escapes_quotes(self):
         self.assertEqual(flux_string('a"b\\c'), 'a\\"b\\\\c')
 

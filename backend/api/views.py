@@ -12,16 +12,26 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
 from switches.health import STALE_MINUTES, assess, port_stats, thresholds_by_role
-from switches.models import Puerto, Switch
-from . import history
+from switches import backups, discovery
+from switches.models import Alerta, Descubierto, Mantenimiento, Puerto, Respaldo, Switch, UmbralOptico
+from usuarios.audit import differences, registrar, snapshot
+from usuarios.models import Bitacora
+from switches.optics import assess_optic, sort_key as optic_sort_key
+from . import history, reports
+from .search import search as search_devices
 from .history import flux_string  # noqa: F401 (usado por pruebas)
-from .permissions import InventoryPermission
-from .serializers import DivisionSerializer, PlantelSerializer, SwitchSerializer, PuertoSerializer
+from .permissions import EditorOnlyPermission, InventoryPermission, can_edit
+from .serializers import (AlertaSerializer, BitacoraSerializer, DescubiertoSerializer, DivisionSerializer,
+                          MantenimientoSerializer, PlantelSerializer, PuertoSerializer, RespaldoSerializer,
+                          SwitchSerializer)
 from .zabbix import status as zabbix_status
 
 LOGIN_MAX_FAILURES = 5
 LOGIN_LOCK_SECONDS = 15 * 60
 SUMMARY_CACHE_SECONDS = 60
+# El worker escribe cada ciclo (60 s); la vista puede refrescar cada 3 s sin ir a InfluxDB.
+OPTICS_CACHE_SECONDS = 30
+OPTIC_LIMIT_FIELDS = ('rx_atencion', 'rx_riesgo', 'rx_saturacion', 'tx_minimo', 'temp_atencion', 'temp_riesgo', 'caida_rx')
 
 
 def requires_session(view):
@@ -69,6 +79,7 @@ def sign_in(request):
         return JsonResponse({'detail': 'Usuario o contraseña incorrectos.'}, status=401)
     cache.delete(key)
     login(request, user)
+    registrar(request, 'sesion', 'usuario', 'Inició sesión', user.pk, usuario=user)
     return JsonResponse(dict(user=user_data(user), csrfToken=get_token(request)))
 
 
@@ -111,6 +122,13 @@ def switch_history(request, pk=None):
         return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
 
 
+@require_GET
+@requires_session
+def search(request):
+    """Buscador global por MAC, IP, descripción de puerto o switch."""
+    return JsonResponse(search_devices(request.GET.get('q', '')))
+
+
 def build_summary(now=None):
     """Estado, motivos, conteos de puertos e histórico de todos los switches."""
     now = now or timezone.now()
@@ -151,21 +169,137 @@ def summary(request):
     return JsonResponse(data)
 
 
-class InventoryViewSet(viewsets.ModelViewSet):
+@require_GET
+@requires_session
+def report(request, kind):
+    """Reporte en JSON (tabla en pantalla) o CSV (?formato=csv) para Excel."""
+    if kind not in reports.REPORTS:
+        return JsonResponse({'detail': 'Reporte desconocido.'}, status=404)
+    data = reports.build(kind, request.GET)
+    if request.GET.get('formato') != 'csv':
+        return JsonResponse(data)
+    import csv
+    from django.http import HttpResponse
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="sonar-{kind}-{timezone.now():%Y%m%d-%H%M}.csv"'
+    response.write('\ufeff')  # BOM: Excel reconoce los acentos.
+    writer = csv.writer(response)
+    writer.writerow([column['titulo'] for column in data['columnas']])
+    for row in data['filas']:
+        writer.writerow([csv_cell(row.get(column['clave'])) for column in data['columnas']])
+    return response
+
+
+def csv_cell(value):
+    """Texto que Excel no interprete como fórmula (las descripciones vienen de los equipos)."""
+    if value is None:
+        return ''
+    if isinstance(value, str) and value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + value
+    return value
+
+
+def build_optics():
+    """Transceptores SFP con su última lectura, nivel y motivos."""
+    limits = UmbralOptico.actual()
+    detail = None
+    try:
+        readings = history.optics_snapshot()
+    except Exception as error:
+        readings, detail = [], f'Lecturas ópticas no disponibles: {error}'
+    switches = {s.nombre: s for s in Switch.objects.select_related('plantel')
+                .filter(nombre__in={r['device'] for r in readings})}
+    ports = {(p.switch_id, p.nombre): p.pk for p in Puerto.objects.filter(switch__in=switches.values())
+             .only('pk', 'switch_id', 'nombre')}
+    items = []
+    for reading in readings:
+        level, reasons = assess_optic(reading, limits)
+        switch = switches.get(reading['device'])
+        items.append(dict(
+            reading, nivel=level, motivos=reasons,
+            switch=switch and dict(id=switch.pk, nombre=switch.nombre, hostname=switch.hostname,
+                                   plantel=switch.plantel_id, plantel_nombre=switch.plantel.nombre),
+            puerto_id=switch and ports.get((switch.pk, reading['interfaz'])),
+        ))
+    items.sort(key=optic_sort_key)
+    return dict(generado=timezone.now().isoformat(), detalle=detail,
+                umbrales={field: getattr(limits, field) for field in OPTIC_LIMIT_FIELDS},
+                transceptores=items)
+
+
+@require_GET
+@requires_session
+def optics(request):
+    data = cache.get('sonar-optics')
+    if data is None or request.GET.get('refresh') == '1':
+        data = build_optics()
+        cache.set('sonar-optics', data, OPTICS_CACHE_SECONDS)
+    return JsonResponse(data)
+
+
+class AuditedMixin:
+    """Cada alta, edición o baja queda en la bitácora con los campos que cambiaron."""
+    audit_object = ''
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        registrar(self.request, 'crear', self.audit_object, f'Creó {self.audit_object} {instance}',
+                  instance.pk, snapshot(instance))
+
+    def perform_update(self, serializer):
+        before = snapshot(serializer.instance)
+        instance = serializer.save()
+        changes = differences(before, snapshot(instance))
+        if changes:
+            registrar(self.request, 'editar', self.audit_object, f'Editó {self.audit_object} {instance}',
+                      instance.pk, changes)
+
+    def perform_destroy(self, instance):
+        registrar(self.request, 'eliminar', self.audit_object, f'Eliminó {self.audit_object} {instance}',
+                  instance.pk, snapshot(instance))
+        instance.delete()
+
+
+class InventoryViewSet(AuditedMixin, viewsets.ModelViewSet):
     permission_classes = [InventoryPermission]
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
 
 class DivisionViewSet(InventoryViewSet):
+    audit_object = 'división'
     queryset = Division.objects.all()
     serializer_class = DivisionSerializer
 
 class PlantelViewSet(InventoryViewSet):
+    audit_object = 'plantel'
     queryset = Plantel.objects.select_related('division').all()
     serializer_class = PlantelSerializer
 
 class SwitchViewSet(InventoryViewSet):
+    audit_object = 'switch'
     queryset = Switch.objects.select_related('plantel').all()
     serializer_class = SwitchSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.action in ('list', 'retrieve'):
+            switches = list(self.get_queryset())
+            now = timezone.now()
+            context['health'] = dict(stats=port_stats([s.pk for s in switches], now), thresholds=thresholds_by_role(),
+                                     now=now, maintenance=Mantenimiento.por_switch(switches, now))
+        return context
+
+    @action(detail=True, methods=['get', 'post'])
+    def respaldos(self, request, pk=None):
+        """Historial de configuraciones (GET) o respaldo inmediato (POST). Sólo editores."""
+        if not can_edit(request.user):
+            return Response({'detail': 'Sólo editores y administradores ven las configuraciones.'}, status=403)
+        switch = self.get_object()
+        if request.method == 'POST':
+            result = backups.backup_switch(switch)
+            registrar(request, 'respaldar', 'switch', f'Respaldó la configuración de {switch.nombre}', switch.pk,
+                      dict(exito=result.exito, error=result.error))
+        versions = Respaldo.objects.filter(switch=switch)[:100]
+        return Response(RespaldoSerializer(versions, many=True).data)
 
     @action(detail=True, methods=['get'])
     def puertos(self, request, pk=None):
@@ -173,3 +307,116 @@ class SwitchViewSet(InventoryViewSet):
         # marca es_fisico al guardar cada interfaz.
         ports = self.get_object().puertos.filter(es_fisico=True)
         return Response(PuertoSerializer(ports, many=True).data)
+
+
+class LimitedListMixin:
+    """?limit=N en el listado (sin recortar el queryset que usa el detalle)."""
+    default_limit = 200
+
+    def list(self, request, *args, **kwargs):
+        try:
+            limit = max(1, min(int(request.query_params.get('limit', self.default_limit)), 2000))
+        except ValueError:
+            limit = self.default_limit
+        items = self.filter_queryset(self.get_queryset())[:limit]
+        return Response(self.get_serializer(items, many=True).data)
+
+
+class AlertaViewSet(LimitedListMixin, viewsets.ReadOnlyModelViewSet):
+    """Centro de alertas: episodios en riesgo, abiertos y cerrados."""
+    permission_classes = [InventoryPermission]
+    serializer_class = AlertaSerializer
+
+    def get_queryset(self):
+        alerts = Alerta.objects.select_related('switch__plantel', 'reconocida_por')
+        if self.request.query_params.get('estado') == 'abiertas':
+            alerts = alerts.filter(fin__isnull=True)
+        return alerts
+
+    @action(detail=False, methods=['get'])
+    def resumen(self, request):
+        open_alerts = Alerta.objects.filter(fin__isnull=True)
+        return Response(dict(abiertas=open_alerts.count(),
+                             sin_reconocer=open_alerts.filter(reconocida_en__isnull=True).count()))
+
+    @action(detail=True, methods=['post'])
+    def reconocer(self, request, pk=None):
+        alert = Alerta.objects.select_related('switch').filter(pk=pk).first()
+        if alert is None:
+            return Response({'detail': 'La alerta no existe.'}, status=404)
+        alert.reconocida_por, alert.reconocida_en = request.user, timezone.now()
+        alert.nota = str(request.data.get('nota', ''))[:2000]
+        alert.save(update_fields=['reconocida_por', 'reconocida_en', 'nota'])
+        registrar(request, 'reconocer', 'alerta', f'Reconoció la alerta de {alert.switch.nombre}', alert.pk,
+                  dict(nota=alert.nota))
+        return Response(AlertaSerializer(alert).data)
+
+
+class MantenimientoViewSet(AuditedMixin, viewsets.ModelViewSet):
+    """Ventanas de mantenimiento por switch o por plantel."""
+    audit_object = 'mantenimiento'
+    permission_classes = [InventoryPermission]
+    serializer_class = MantenimientoSerializer
+    queryset = Mantenimiento.objects.select_related('switch', 'plantel', 'creado_por')
+
+    def get_queryset(self):
+        windows = super().get_queryset()
+        if self.request.query_params.get('vigentes') == '1':
+            windows = windows.filter(fin__gt=timezone.now())
+        return windows
+
+    def perform_create(self, serializer):
+        serializer.save(creado_por=self.request.user)
+        instance = serializer.instance
+        registrar(self.request, 'crear', 'mantenimiento', f'Programó mantenimiento: {instance}', instance.pk,
+                  snapshot(instance))
+
+
+class BitacoraViewSet(LimitedListMixin, viewsets.ReadOnlyModelViewSet):
+    """Bitácora de cambios; sólo editores y administradores (incluye IPs)."""
+    permission_classes = [EditorOnlyPermission]
+    serializer_class = BitacoraSerializer
+    default_limit = 300
+
+    def get_queryset(self):
+        entries = Bitacora.objects.all()
+        if self.request.query_params.get('objeto'):
+            entries = entries.filter(objeto=self.request.query_params['objeto'])
+        return entries
+
+
+class DescubiertoViewSet(LimitedListMixin, viewsets.ReadOnlyModelViewSet):
+    """Equipos vistos por CDP o barrido SNMP que no están en el inventario."""
+    permission_classes = [EditorOnlyPermission]
+    serializer_class = DescubiertoSerializer
+
+    def get_queryset(self):
+        return discovery.pending()
+
+    @action(detail=True, methods=['post'])
+    def ignorar(self, request, pk=None):
+        candidate = Descubierto.objects.filter(pk=pk).first()
+        if candidate is None:
+            return Response({'detail': 'El equipo no existe.'}, status=404)
+        candidate.estado = 'ignorado'
+        candidate.save(update_fields=['estado'])
+        registrar(request, 'ignorar', 'descubierto', f'Ignoró el equipo descubierto {candidate}', candidate.pk)
+        return Response(DescubiertoSerializer(candidate).data)
+
+
+@require_GET
+@requires_session
+def backup_detail(request, pk):
+    """Contenido de una versión y diferencias con la anterior; secretos ocultos salvo para administradores."""
+    if not can_edit(request.user):
+        return JsonResponse({'detail': 'Sólo editores y administradores ven las configuraciones.'}, status=403)
+    version = Respaldo.objects.select_related('switch').filter(pk=pk, exito=True).first()
+    if version is None:
+        return JsonResponse({'detail': 'El respaldo no existe.'}, status=404)
+    previous = (Respaldo.objects.filter(switch=version.switch, exito=True, momento__lt=version.momento)
+                .order_by('-momento').first())
+    full = request.user.is_superuser or request.user.rol == 'admin'
+    show = (lambda text: text) if full else backups.redact
+    return JsonResponse(dict(RespaldoSerializer(version).data, switch_nombre=version.switch.nombre,
+                             contenido=show(version.contenido), secretos_ocultos=not full,
+                             diferencias=show(backups.diff(previous.contenido if previous else '', version.contenido))))

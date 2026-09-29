@@ -14,6 +14,8 @@ from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNM
 from sonar.database.influx_writer import InfluxWriter
 from sonar.database.django_store import record_poll, notify_alerts
 from sonar.collector.snmp_collector import obtener_datos_reales
+from sonar.discovery import Scheduler as DiscoveryScheduler
+from sonar.database.django_store import BackupScheduler
 
 log = get_logger(__name__)
 
@@ -96,6 +98,8 @@ async def main() -> None:
 
     validate_snmp()
     writer = InfluxWriter()
+    discovery = DiscoveryScheduler()
+    backups = BackupScheduler()
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
@@ -106,6 +110,9 @@ async def main() -> None:
                 log.exception("No se pudo recargar el inventario; se omite este ciclo")
             else:
                 await ejecutar_ciclo(inventario, writer)
+                # Tareas lentas y opcionales (DISCOVERY_ENABLED / BACKUP_ENABLED).
+                await discovery.maybe_run()
+                await backups.maybe_run()
             log.info(f"Esperando {POLL_INTERVAL}s...\n")
             await asyncio.sleep(POLL_INTERVAL)
 

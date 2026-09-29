@@ -2,7 +2,7 @@
 # pyrefly: ignore [missing-import]
 from django.contrib import admin
 # pyrefly: ignore [missing-import]
-from .models import Switch, Puerto, UmbralRol
+from .models import Switch, Puerto, UmbralOptico, UmbralRol
 
 @admin.register(Switch)
 class SwitchAdmin(admin.ModelAdmin):
@@ -19,3 +19,11 @@ class PuertoAdmin(admin.ModelAdmin):
 @admin.register(UmbralRol)
 class UmbralRolAdmin(admin.ModelAdmin):
     list_display = ['rol', 'cpu_atencion', 'cpu_riesgo', 'memoria_atencion', 'memoria_riesgo']
+
+@admin.register(UmbralOptico)
+class UmbralOpticoAdmin(admin.ModelAdmin):
+    list_display = ['__str__', 'rx_atencion', 'rx_riesgo', 'tx_minimo', 'temp_atencion', 'temp_riesgo']
+
+    def has_add_permission(self, request):
+        # Una sola fila de umbrales.
+        return not UmbralOptico.objects.exists()

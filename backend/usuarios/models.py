@@ -46,3 +46,23 @@ class Usuario(AbstractUser):
     @property
     def es_lector(self):
         return True  # Todos pueden leer
+
+class Bitacora(models.Model):
+    """Quién cambió qué y cuándo (inventario, alertas, mantenimientos, respaldos)."""
+    usuario = models.ForeignKey(Usuario, null=True, blank=True, on_delete=models.SET_NULL, related_name='bitacora')
+    usuario_nombre = models.CharField(max_length=150, blank=True, default='')
+    accion = models.CharField(max_length=30)
+    objeto = models.CharField(max_length=30)
+    objeto_id = models.IntegerField(null=True, blank=True)
+    descripcion = models.CharField(max_length=255)
+    cambios = models.JSONField(default=dict, blank=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    momento = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Registro de bitácora"
+        verbose_name_plural = "Bitácora"
+        ordering = ['-momento']
+
+    def __str__(self):
+        return f"{self.momento:%Y-%m-%d %H:%M} {self.usuario_nombre}: {self.descripcion}"

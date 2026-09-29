@@ -126,6 +126,20 @@ def mostrar_reporte(datos: dict) -> None:
     print("=" * 55 + "\n")
 
 
+# Equipos que "responden" SNMP en la red simulada (para probar el descubrimiento
+# sin barrer la red real). Clave: IP; valor: sysName y sysDescr.
+RED_SIMULADA = {
+    "192.0.2.10": {"nombre": "SW-CORE-01", "descripcion": "Cisco IOS Software, Catalyst L3 Switch"},
+    "192.0.2.21": {"nombre": "SW-ACC-NUEVO", "descripcion": "Cisco IOS XE Software, C9200L"},
+    "192.0.2.30": {"nombre": "AP-BIBLIOTECA", "descripcion": "Cisco AP Software, C9120AXI"},
+}
+
+
+async def sondeo_simulado(ip: str) -> dict | None:
+    """Imita snmp_probe de sonar/discovery.py: sysName/sysDescr o None si no responde."""
+    return RED_SIMULADA.get(ip)
+
+
 # Punto de entrada
 if __name__ == "__main__":
     datos = obtener_datos_switch()

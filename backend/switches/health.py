@@ -13,6 +13,12 @@ from .models import Switch, UmbralRol
 STALE_MINUTES = 5
 RECENT_REBOOT_HOURS = 24
 RECENT_ERROR_HOURS = 24
+# Puerto inestable: FLAP_CHANGES o más cambios up/down en la última hora.
+FLAP_WINDOW = timedelta(hours=1)
+FLAP_CHANGES = 4
+SATURATION_PCT = 90
+POE_BUDGET_PCT = 90
+HARDWARE_LABEL = {'temperatura': 'Sensor de temperatura', 'ventilador': 'Ventilador', 'fuente': 'Fuente de poder'}
 LEVEL_RANK = {'ok': 0, 'warning': 1, 'critical': 2}
 DEFAULTS = dict(cpu_atencion=70, cpu_riesgo=90, memoria_atencion=80, memoria_riesgo=90)
 
@@ -29,7 +35,7 @@ def port_stats(switch_ids, now=None):
     """Conteos de puertos físicos por switch, calculados en la base de datos."""
     now = now or timezone.now()
     since = now - timedelta(hours=RECENT_ERROR_HOURS)
-    from .models import Puerto
+    from .models import EventoPuerto, Puerto
     rows = (Puerto.objects.filter(switch_id__in=switch_ids, es_fisico=True)
             .values('switch_id')
             .annotate(total=Count('id'),
@@ -38,11 +44,17 @@ def port_stats(switch_ids, now=None):
                       con_errores=Count('id', filter=Q(ultimo_error__gte=since)),
                       danados=Count('id', filter=Q(estado='rojo')),
                       troncales=Count('id', filter=Q(es_trunk=True)),
-                      voz=Count('id', filter=Q(voice_vlan__gt=0) & ~Q(voice_vlan=4096))))
-    empty = dict(total=0, up=0, down=0, con_errores=0, danados=0, troncales=0, voz=0)
+                      voz=Count('id', filter=Q(voice_vlan__gt=0) & ~Q(voice_vlan=4096)),
+                      saturados=Count('id', filter=Q(uso_pct__gte=SATURATION_PCT))))
+    empty = dict(total=0, up=0, down=0, con_errores=0, danados=0, troncales=0, voz=0, saturados=0, inestables=0)
     stats = {switch_id: dict(empty) for switch_id in switch_ids}
     for row in rows:
-        stats[row.pop('switch_id')] = row
+        stats[row.pop('switch_id')] = dict(row, inestables=0)
+    flapping = (EventoPuerto.objects.filter(puerto__switch_id__in=switch_ids, momento__gte=now - FLAP_WINDOW)
+                .values('puerto__switch_id', 'puerto_id').annotate(changes=Count('id'))
+                .filter(changes__gte=FLAP_CHANGES))
+    for row in flapping:
+        stats[row['puerto__switch_id']]['inestables'] += 1
     return stats
 
 
@@ -94,4 +106,22 @@ def assess(switch, stats, thresholds, now=None):
     if stats.get('danados'):
         level = _worst(level, 'warning')
         reasons.append(dict(level='warning', text=f"{stats['danados']} puerto(s) marcados como dañados"))
+    if stats.get('inestables'):
+        level = _worst(level, 'warning')
+        reasons.append(dict(level='warning', text=f"{stats['inestables']} puerto(s) inestables (≥ {FLAP_CHANGES} cambios en 1 h)"))
+    if stats.get('saturados'):
+        level = _worst(level, 'warning')
+        reasons.append(dict(level='warning', text=f"{stats['saturados']} puerto(s) al {SATURATION_PCT}% o más de su capacidad"))
+    for component in switch.hardware or []:
+        if component.get('estado') in ('warning', 'critical'):
+            label = HARDWARE_LABEL.get(component.get('tipo'), 'Componente')
+            state = 'en falla' if component['estado'] == 'critical' else 'con advertencia'
+            value = f" ({component['valor']} °C)" if component.get('valor') is not None else ''
+            level = _worst(level, component['estado'])
+            reasons.append(dict(level=component['estado'], text=f"{label} {component.get('nombre', '')} {state}{value}".replace('  ', ' ')))
+    if switch.poe_presupuesto_w and switch.poe_consumo_w is not None:
+        used = switch.poe_consumo_w * 100 / switch.poe_presupuesto_w
+        if used >= POE_BUDGET_PCT:
+            level = _worst(level, 'warning')
+            reasons.append(dict(level='warning', text=f'PoE al {round(used)}% del presupuesto ({switch.poe_consumo_w:g} de {switch.poe_presupuesto_w:g} W)'))
     return level, reasons

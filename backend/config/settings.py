@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
@@ -58,6 +59,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # ETag + 304 para las consultas repetidas del refresco automático.
+    'django.middleware.http.ConditionalGetMiddleware',
+    'api.middleware.ApiRevalidateMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -193,6 +197,9 @@ CACHES = {
         'LOCATION': os.getenv('DJANGO_CACHE_DIR', os.path.join(tempfile.gettempdir(), 'sonar-cache')),
     }
 }
+# Las pruebas no deben leer ni borrar la caché del servidor que esté corriendo.
+if len(sys.argv) > 1 and sys.argv[1] == 'test':
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 # Correo para alertas (switches/alerts.py). Sin EMAIL_HOST no se envía nada.
 EMAIL_HOST = os.getenv('EMAIL_HOST', '')

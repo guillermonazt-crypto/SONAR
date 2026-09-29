@@ -23,6 +23,7 @@ import re
 
 from sonar.utils.logger import get_logger
 from sonar.utils import config
+from sonar.collector.extras import mentions_interface, obtener_extras
 
 log = get_logger(__name__)
 
@@ -352,8 +353,10 @@ async def obtener_sistema(dispositivo: dict) -> dict:
             if total > 0:
                 candidates.append((total, occupied))
     total_bytes, used_bytes = max(candidates, default=(None, None))
+    ticks = _safe_int(uptime_raw)
     return {
-        'uptime_segundos': _safe_int(uptime_raw),
+        # sysUpTime viene en TimeTicks (centésimas de segundo).
+        'uptime_segundos': ticks // 100 if ticks is not None else None,
         'memoria_total_bytes': total_bytes,
         'memoria_usada_bytes': used_bytes,
         'memoria_usada_pct': round(used_bytes * 100 / total_bytes, 2) if total_bytes and used_bytes is not None else None,
@@ -397,7 +400,8 @@ async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict
     result = {}
     for index, value in sensor_values.items():
         label = name_by_index.get(index, '').lower()
-        match = next((item for item in interfaces if item['nombre'].lower() in label or label in item['nombre'].lower()), None)
+        # Cisco nombra los sensores con la forma corta ("Te1/1/1 Receive Power Sensor").
+        match = next((item for item in interfaces if mentions_interface(label, item['nombre'])), None)
         if not match:
             continue
         slot = result.setdefault(match['nombre'], {'interfaz': match['nombre'], 'rx_dbm': None, 'tx_dbm': None, 'temp_c': None, 'estado': 'ok'})
@@ -507,8 +511,13 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
         identidad = await obtener_identidad(dispositivo)
         sistema = await obtener_sistema(dispositivo)
         transceptores = await obtener_optica(dispositivo, interfaces)
+        uptime = sistema.get('uptime_segundos')
+        extras_puerto, extras_switch = await obtener_extras(
+            lambda oid: _walk_oid_rows(dispositivo['hostname'], config.SNMP_COMMUNITY, oid),
+            interfaces, uptime * 100 if uptime is not None else None)
         for interface in interfaces:
             interface.update(red.get(interface['indice'], {}))
+            interface.update(extras_puerto.get(interface['indice'], {}))
 
         return {
             'nombre':        nombre,
@@ -523,6 +532,7 @@ async def obtener_datos_reales(dispositivo: dict) -> dict | None:
             'transceptores': transceptores,
             **sistema,
             **identidad,
+            **extras_switch,
         }
 
     except Exception as e:
