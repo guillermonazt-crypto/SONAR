@@ -20,10 +20,12 @@ from pysnmp.hlapi.asyncio import (
 )
 import asyncio
 import re
+import time
 
 from sonar.utils.logger import get_logger
 from sonar.utils import config
-from sonar.collector.extras import mentions_interface, obtener_extras, tabla_mac
+from sonar.collector.extras import obtener_extras, tabla_mac
+from sonar.collector import dom
 
 log = get_logger(__name__)
 
@@ -89,22 +91,6 @@ OID_MEMORY = {
     'used': '1.3.6.1.2.1.25.2.3.1.6',
 }
 
-OID_SENSOR = {
-    'name': '1.3.6.1.2.1.47.1.1.1.1.7',
-    'type': '1.3.6.1.2.1.99.1.1.1.1',
-    'scale': '1.3.6.1.2.1.99.1.1.1.2',
-    'precision': '1.3.6.1.2.1.99.1.1.1.3',
-    'value': '1.3.6.1.2.1.99.1.1.1.4',
-    'status': '1.3.6.1.2.1.99.1.1.1.5',
-}
-OID_CISCO_SENSOR = {
-    'type': '1.3.6.1.4.1.9.9.91.1.1.1.1',
-    'scale': '1.3.6.1.4.1.9.9.91.1.1.1.2',
-    'precision': '1.3.6.1.4.1.9.9.91.1.1.1.3',
-    'value': '1.3.6.1.4.1.9.9.91.1.1.1.4',
-    'status': '1.3.6.1.4.1.9.9.91.1.1.1.5',
-}
-
 # Interfaces que corresponden a conectores del panel frontal.  Las interfaces
 # de gestión, VLAN, stack y AppGigabit también aparecen en IF-MIB, pero no son
 # puertos físicos que deban dibujarse en el inventario.
@@ -156,6 +142,26 @@ async def _get_oid(ip: str, community: str, oid: str) -> str | None:
         return str(varBind[1])
 
     return None
+
+
+async def _get_many(ip: str, community: str, oids: list[str], chunk: int = 20) -> dict[str, object]:
+    """GET de varios OID en pocas PDU; omite los que el equipo no tiene."""
+    result = {}
+    for start in range(0, len(oids), chunk):
+        error_indication, error_status, _error_index, var_binds = await get_cmd(
+            SnmpEngine(), _auth(community),
+            await UdpTransportTarget.create((ip, config.SNMP_PORT),
+                                            timeout=config.SNMP_TIMEOUT,
+                                            retries=config.SNMP_RETRIES),
+            ContextData(), *(ObjectType(ObjectIdentity(oid)) for oid in oids[start:start + chunk]))
+        if error_indication or error_status:
+            continue
+        for oid, value in var_binds:
+            # noSuchObject / noSuchInstance / endOfMibView no son lecturas.
+            if value.__class__.__name__ in ('NoSuchObject', 'NoSuchInstance', 'EndOfMibView'):
+                continue
+            result[str(oid)] = value
+    return result
 
 
 async def _walk_oid(ip: str, community: str, oid: str) -> dict:
@@ -364,57 +370,84 @@ async def obtener_sistema(dispositivo: dict) -> dict:
     }
 
 
-async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict]:
-    """Lee sensores DOM ópticos publicados por ENTITY-SENSOR-MIB.
+# Estructura DOM por switch (nombres, contenedores, puertos y umbrales): sólo
+# cambia al insertar o retirar un transceptor, que también cambia los índices.
+_DOM_CACHE: dict[str, tuple[float, tuple, dict]] = {}
+DOM_CACHE_SECONDS = 6 * 3600
 
-    Muchos equipos no exponen DOM por SNMP; en ese caso devuelve una lista
-    vacía y no inventa valores.
+
+async def _dom_structure(ip: str, community: str, types: dict[int, int]) -> dict:
+    """Nombres, jerarquía, ifIndex y umbrales de los sensores; cacheado por firma."""
+    signature = tuple(sorted(types.items()))
+    cached = _DOM_CACHE.get(ip)
+    if cached and cached[1] == signature and time.monotonic() - cached[0] < DOM_CACHE_SECONDS:
+        return cached[2]
+    indexes = list(types)
+    values = await _get_many(ip, community, [f"{dom.OID_ENTITY['name']}.{i}" for i in indexes])
+    names = {i: str(values.get(f"{dom.OID_ENTITY['name']}.{i}", '')) for i in indexes}
+    optic = dom.optic_sensor_indexes(types, names)
+    structure = dict(names=names, parents={}, parent_names={}, parent_ifindex={}, thresholds={})
+    if optic:
+        values = await _get_many(ip, community, [f"{dom.OID_ENTITY['contained_in']}.{i}" for i in indexes])
+        parents = {i: _safe_int(str(values.get(f"{dom.OID_ENTITY['contained_in']}.{i}"))) for i in indexes}
+        optic_parents = sorted({parents[i] for i in optic if parents.get(i)})
+        values = await _get_many(ip, community, [
+            *(f"{dom.OID_ENTITY['name']}.{p}" for p in optic_parents),
+            *(f"{dom.OID_ENTITY['alias']}.{p}.0" for p in optic_parents)])
+        rows = {key: await _walk_oid_rows(ip, community, oid) for key, oid in dom.OID_THRESHOLD.items()}
+        by_key = {key: {tuple(suffix): value for suffix, value in items if len(suffix) == 2}
+                  for key, items in rows.items()}
+        thresholds = {}
+        for (sensor, row), raw in by_key['value'].items():
+            thresholds.setdefault(sensor, []).append((
+                _safe_int(str(by_key['severity'].get((sensor, row)))),
+                _safe_int(str(by_key['relation'].get((sensor, row)))), _safe_int(str(raw))))
+        structure.update(
+            parents=parents, thresholds=thresholds,
+            parent_names={p: str(values.get(f"{dom.OID_ENTITY['name']}.{p}", '')) for p in optic_parents},
+            parent_ifindex={p: dom.if_index_from_alias(values.get(f"{dom.OID_ENTITY['alias']}.{p}.0"))
+                            for p in optic_parents})
+    _DOM_CACHE[ip] = (time.monotonic(), signature, structure)
+    return structure
+
+
+async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict] | None:
+    """Lee el DOM de los transceptores (potencia RX/TX, temperatura, voltaje, bias).
+
+    Usa CISCO-ENTITY-SENSOR-MIB y, si está vacía, ENTITY-SENSOR-MIB. Los equipos
+    sin ópticas con DOM (cobre, módulos sin DOM) devuelven [] tras un solo walk.
+    None indica que la consulta falló y no se sabe nada.
     """
     ip = dispositivo['hostname']
     community = config.SNMP_COMMUNITY
     try:
-        names, types, scales, precisions, values, statuses = await asyncio.gather(
-            *(_walk_oid_rows(ip, community, oid) for oid in OID_SENSOR.values())
-        )
-        # IOS-XE commonly exposes DOM through the Cisco enterprise MIB when
-        # the standard ENTITY-SENSOR-MIB is empty.
-        if not values:
-            types, scales, precisions, values, statuses = await asyncio.gather(
-                *(_walk_oid_rows(ip, community, oid) for oid in OID_CISCO_SENSOR.values())
-            )
+        oids = dom.OID_CISCO_SENSOR
+        types = {suffix[-1]: _safe_int(str(value)) for suffix, value in await _walk_oid_rows(ip, community, oids['type']) if suffix}
+        if not types:
+            oids = dom.OID_STD_SENSOR
+            types = {suffix[-1]: _safe_int(str(value)) for suffix, value in await _walk_oid_rows(ip, community, oids['type']) if suffix}
+        if not any(t in dom.POWER_TYPES for t in types.values()):
+            return []
+        structure = await _dom_structure(ip, community, types)
+        optic_parents = {structure['parents'].get(i) for i in dom.optic_sensor_indexes(types, structure['names'])}
+        sensors = [i for i, parent in structure['parents'].items() if parent in optic_parents and parent]
+        if not sensors:
+            return []
+        if_indexes = sorted({i for i in structure['parent_ifindex'].values() if i})
+        values = await _get_many(ip, community, [
+            *(f"{oids[column]}.{i}" for i in sensors for column in ('scale', 'precision', 'value', 'status')),
+            *(f"{dom.OID_IF_ADMIN}.{i}" for i in if_indexes)])
     except Exception as error:
         log.debug(f"[{dispositivo.get('name', ip)}] Sensores ópticos no disponibles: {error}")
-        return []
-    name_by_index = {suffix[-1]: str(value) for suffix, value in names if suffix}
-    scale_by_index = {suffix[-1]: _safe_int(str(value), 0) or 0 for suffix, value in scales if suffix}
-    precision_by_index = {suffix[-1]: _safe_int(str(value), 0) or 0 for suffix, value in precisions if suffix}
-    status_by_index = {suffix[-1]: _safe_int(str(value)) for suffix, value in statuses if suffix}
-    sensor_values = {}
-    for suffix, value in values:
-        if not suffix:
-            continue
-        index = suffix[-1]
-        raw = _safe_int(str(value))
-        if raw is None:
-            continue
-        sensor_values[index] = raw * (10 ** scale_by_index.get(index, 0)) / (10 ** precision_by_index.get(index, 0))
-    result = {}
-    for index, value in sensor_values.items():
-        label = name_by_index.get(index, '').lower()
-        # Cisco nombra los sensores con la forma corta ("Te1/1/1 Receive Power Sensor").
-        match = next((item for item in interfaces if mentions_interface(label, item['nombre'])), None)
-        if not match:
-            continue
-        slot = result.setdefault(match['nombre'], {'interfaz': match['nombre'], 'rx_dbm': None, 'tx_dbm': None, 'temp_c': None, 'estado': 'ok'})
-        if any(word in label for word in ('receive', ' rx', 'rx power', 'optical rx')):
-            slot['rx_dbm'] = round(value, 3)
-        elif any(word in label for word in ('transmit', ' tx', 'tx power', 'optical tx')):
-            slot['tx_dbm'] = round(value, 3)
-        elif any(word in label for word in ('temperature', 'temp')):
-            slot['temp_c'] = round(value, 2)
-        if status_by_index.get(index) not in (None, 1):
-            slot['estado'] = 'alerta'
-    return [item for item in result.values() if item['rx_dbm'] is not None or item['tx_dbm'] is not None or item['temp_c'] is not None]
+        return None
+    read = lambda column, i: _safe_int(str(values[f"{oids[column]}.{i}"])) if f"{oids[column]}.{i}" in values else None
+    readings = {i: dict(type=types[i], name=structure['names'].get(i), scale=read('scale', i),
+                        precision=read('precision', i), value=read('value', i), status=read('status', i))
+                for i in sensors}
+    admin = {i: _safe_int(str(values[f"{dom.OID_IF_ADMIN}.{i}"])) for i in if_indexes
+             if f"{dom.OID_IF_ADMIN}.{i}" in values}
+    return dom.build_transceivers(readings, structure['thresholds'], structure['parents'],
+                                  structure['parent_names'], structure['parent_ifindex'], interfaces, admin)
 
 
 async def obtener_identidad(dispositivo: dict) -> dict:

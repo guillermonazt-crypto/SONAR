@@ -97,46 +97,6 @@ def port_history(switch_name, port_name, hours=24):
     return sorted(points, key=lambda point: point['time'])
 
 
-def optics_snapshot(hours=24):
-    """Última lectura de cada transceptor y su RX máxima del periodo.
-
-    Devuelve [{device, interfaz, time, rx_dbm, tx_dbm, temperatura, atenuacion, estado, rx_max_24h}].
-    """
-    url, token, org, bucket = influx_settings()
-    base = f'''from(bucket: "{flux_string(bucket)}")
-  |> range(start: -{int(hours)}h)
-  |> filter(fn: (r) => r._measurement == "optica")'''
-    latest_flux = f'''{base}
-  |> group(columns: ["device", "interface", "_field"])
-  |> last()'''
-    peak_flux = f'''{base}
-  |> filter(fn: (r) => r._field == "rx_dbm")
-  |> group(columns: ["device", "interface"])
-  |> max()'''
-    readings = {}
-
-    def slot(record):
-        key = (record.values.get('device'), record.values.get('interface'))
-        return readings.setdefault(key, dict(
-            device=key[0], interfaz=key[1], time=None, rx_dbm=None, tx_dbm=None,
-            temperatura=None, atenuacion=None, estado=None, rx_max_24h=None))
-
-    with InfluxDBClient(url=url, token=token, org=org) as client:
-        query_api = client.query_api()
-        for table in query_api.query(latest_flux, org=org):
-            for record in table.records:
-                item = slot(record)
-                field = record.get_field()
-                if field in item:
-                    item[field] = record.get_value()
-                time = record.get_time().isoformat()
-                item['time'] = max(item['time'] or time, time)
-        for table in query_api.query(peak_flux, org=org):
-            for record in table.records:
-                slot(record)['rx_max_24h'] = record.get_value()
-    return list(readings.values())
-
-
 def trend_buckets():
     """Buckets a intentar para tendencias de días: el de largo plazo primero.
 

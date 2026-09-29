@@ -24,6 +24,7 @@ export const REASON_TYPES = [
   ["inestables", "Puertos inestables"],
   ["saturacion", "Saturación"],
   ["hardware", "Hardware"],
+  ["optica", "Ópticas SFP"],
   ["poe", "PoE"],
   ["reinicio", "Reinicio"],
 ];

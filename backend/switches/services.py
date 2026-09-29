@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 from .interfaces import is_physical_interface
+from .optics import update_baseline
 from .models import EventoPuerto, Switch, Puerto
 
 ERROR_FIELDS = ('errores_entrada', 'errores_salida', 'errores_crc')
@@ -11,7 +12,7 @@ OPTIONAL_FIELDS = ('es_trunk', 'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp'
                    'vecino_plataforma', 'vecino_ip', 'vecino_tipo', 'velocidad_mbps', 'poe_estado', 'poe_mw')
 UPDATE_FIELDS = ['nombre', 'descripcion', 'estado_operativo', *ERROR_FIELDS, 'errores_nuevos',
                  'ultimo_error', 'es_fisico', 'actualizado', *OPTIONAL_FIELDS,
-                 'bps_entrada', 'bps_salida', 'uso_pct', 'ultimo_cambio', 'ultimo_activo']
+                 'bps_entrada', 'bps_salida', 'uso_pct', 'ultimo_cambio', 'ultimo_activo', 'optica']
 SWITCH_EXTRA_FIELDS = ('temperatura_c', 'hardware', 'poe_presupuesto_w', 'poe_consumo_w')
 EVENT_RETENTION = timedelta(days=7)
 LINK_STATES = ('up', 'down')
@@ -46,6 +47,20 @@ def link_history(port, previous_state, item, now, events):
         port.ultimo_cambio = now - timedelta(seconds=item['ultimo_cambio_hace_s'])
     if state == 'down' and port.ultimo_activo is None and port.ultimo_cambio:
         port.ultimo_activo = port.ultimo_cambio
+
+
+OPTIC_FIELDS = (('rx_dbm', 'rx_dbm'), ('tx_dbm', 'tx_dbm'), ('temperatura', 'temp_c'), ('voltaje_v', 'voltaje_v'),
+                ('bias_ma', 'bias_ma'), ('estado', 'estado'), ('sin_senal', 'sin_senal'), ('admin', 'admin'),
+                ('umbrales', 'umbrales'))
+
+
+def optic_reading(previous, item, now):
+    """Lectura DOM a guardar en Puerto.optica, con la línea base de RX al día."""
+    reading = {field: item.get(source) for field, source in OPTIC_FIELDS}
+    reading['umbrales'] = reading['umbrales'] or {}
+    reading['rx_base_dbm'] = update_baseline(previous, reading, now)
+    reading['time'] = now.isoformat()
+    return reading
 
 
 def new_errors(previous, current):
@@ -94,6 +109,10 @@ def record_poll(switch_id, hostname, datos):
                               errores_crc=None, errores_nuevos=None)
         return
 
+    # None: la consulta DOM falló y se conservan las lecturas anteriores.
+    optics = datos.get('transceptores')
+    optics_by_port = None if optics is None else {
+        (item.get('indice') or item.get('interfaz')): item for item in optics}
     existing = {port.indice: port for port in switch.puertos.all()}
     seen, to_create, to_update, events = set(), [], [], []
     for item in datos.get('interfaces', []):
@@ -130,6 +149,9 @@ def record_poll(switch_id, hostname, datos):
                 setattr(port, field, item[field])
         traffic(port, previous_traffic, now)
         link_history(port, previous_state, item, now, events)
+        if optics_by_port is not None:
+            optic = optics_by_port.get(indice) or optics_by_port.get(port.nombre)
+            port.optica = optic_reading(port.optica, optic, now) if optic else None
 
     for indice, port in existing.items():
         if indice not in seen:

@@ -1006,6 +1006,9 @@ footer {
 }
 .risk-list li span:last-child { color: var(--muted); font-size: 12px; }
 .thresholds { color: var(--muted-2); font-size: 11px; margin-top: 14px; }
+.optic-metric { display: flex; flex-direction: column; align-items: flex-end; }
+.optic-metric > span { font-weight: 600; }
+.optic-metric small { color: var(--muted-2); font-size: 10px; white-space: normal; text-align: right; }
 .status-badge {
   display: inline-flex;
   align-items: center;

@@ -20,6 +20,36 @@ const FILTERS = [
 const number = (value, unit, digits = 1) =>
   value === null || value === undefined ? "—" : `${Number(value).toFixed(digits)} ${unit}`;
 
+// Umbrales efectivos (del módulo o globales) en una línea corta bajo el valor.
+function limitText(limits, unit) {
+  if (!limits) return "";
+  const parts = [];
+  if (limits.baja_alarma != null) parts.push(`alarma ≤ ${limits.baja_alarma}`);
+  if (limits.baja_aviso != null) parts.push(`aviso ≤ ${limits.baja_aviso}`);
+  if (limits.alta_aviso != null) parts.push(`aviso ≥ ${limits.alta_aviso}`);
+  if (limits.alta_alarma != null) parts.push(`alarma ≥ ${limits.alta_alarma}`);
+  const origin = limits.origen === "switch" ? "módulo" : "global";
+  return parts.length ? `${parts.join(" · ")} ${unit} (${origin})` : "";
+}
+
+/** Valor coloreado según el nivel de esa métrica, con sus umbrales debajo. */
+function Metric({ item, metric, field, unit, digits = 1 }) {
+  const level = item.niveles?.[metric] || "ok";
+  const limits = limitText(item.umbrales?.[metric], unit);
+  return (
+    <div className="optic-metric" title={limits}>
+      <span className={level === "ok" ? "" : `status-${level}-text`}>{number(item[field], unit, digits)}</span>
+      {limits && <small>{limits}</small>}
+    </div>
+  );
+}
+
+function linkState(item) {
+  if (item.admin === "down") return "Puerto deshabilitado";
+  if (item.sin_senal) return "Sin luz en RX";
+  return "";
+}
+
 function LevelBadge({ level }) {
   const info = LEVELS[level] || LEVELS.ok;
   return (
@@ -71,9 +101,32 @@ export default function Optics({ onOpenPort = () => {} }) {
         </div>
       ),
     },
-    { name: "RX", sortable: true, right: true, selector: (item) => item.rx_dbm ?? -99, cell: (item) => number(item.rx_dbm, "dBm") },
-    { name: "TX", sortable: true, right: true, selector: (item) => item.tx_dbm ?? -99, cell: (item) => number(item.tx_dbm, "dBm") },
-    { name: "Temp.", sortable: true, right: true, selector: (item) => item.temperatura ?? -99, cell: (item) => number(item.temperatura, "°C", 0) },
+    {
+      name: "RX",
+      sortable: true,
+      right: true,
+      grow: 1.3,
+      selector: (item) => item.rx_dbm ?? -99,
+      cell: (item) => (
+        <div>
+          <Metric item={item} metric="rx" field="rx_dbm" unit="dBm" />
+          {item.rx_base_dbm != null && !item.sin_senal && <small>base 7 d: {number(item.rx_base_dbm, "dBm")}</small>}
+          {linkState(item) && <small>{linkState(item)}</small>}
+        </div>
+      ),
+    },
+    { name: "TX", sortable: true, right: true, grow: 1.3, selector: (item) => item.tx_dbm ?? -99, cell: (item) => <Metric item={item} metric="tx" field="tx_dbm" unit="dBm" /> },
+    { name: "Temp.", sortable: true, right: true, grow: 1.1, selector: (item) => item.temperatura ?? -99, cell: (item) => <Metric item={item} metric="temp" field="temperatura" unit="°C" digits={0} /> },
+    {
+      name: "Láser",
+      right: true,
+      cell: (item) => (
+        <div>
+          <span>{number(item.bias_ma, "mA")}</span>
+          <small>{number(item.voltaje_v, "V", 2)}</small>
+        </div>
+      ),
+    },
     { name: "Atenuación", sortable: true, right: true, selector: (item) => item.atenuacion ?? -1, cell: (item) => number(item.atenuacion, "dB") },
     {
       name: "Motivos",
@@ -118,7 +171,7 @@ export default function Optics({ onOpenPort = () => {} }) {
         <article>
           <span>TRANSCEPTORES</span>
           <strong>{items.length}</strong>
-          <small>con lectura DOM en 24 h</small>
+          <small>con lectura DOM</small>
         </article>
         <article>
           <span>EN RIESGO</span>
@@ -149,15 +202,17 @@ export default function Optics({ onOpenPort = () => {} }) {
               keyField="clave"
               defaultSortFieldId={1}
               defaultSortAsc={false}
-              noDataComponent="No hay lecturas ópticas. Muchos equipos no publican DOM por SNMP."
+              noDataComponent="No hay lecturas ópticas. Los puertos de cobre y los módulos sin DOM no publican potencia óptica por SNMP."
             />
           </div>
         )}
         {limits && (
           <p className="thresholds">
-            Umbrales (editables en el admin, Umbrales ópticos): RX atención ≤ {limits.rx_atencion} dBm · riesgo ≤ {limits.rx_riesgo} dBm ·
+            Mandan los umbrales DOM que publica cada módulo (marcados «módulo»). Respaldo global para módulos sin umbrales
+            (editable en el admin, Umbrales ópticos): RX atención ≤ {limits.rx_atencion} dBm · riesgo ≤ {limits.rx_riesgo} dBm ·
             saturación ≥ {limits.rx_saturacion} dBm · TX mínimo {limits.tx_minimo} dBm · temperatura {limits.temp_atencion}/{limits.temp_riesgo} °C ·
-            degradación: caída de RX ≥ {limits.caida_rx} dB en 24 h.
+            degradación: caída de RX ≥ {limits.caida_rx} dB frente a su línea base de 7 días. Los puertos deshabilitados o sin
+            enlace no generan alertas.
           </p>
         )}
       </section>

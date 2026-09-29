@@ -54,15 +54,35 @@ def port_stats(switch_ids, now=None):
                       poe_falla=Count('id', filter=Q(poe_estado__in=POE_FAULT_STATES))))
     empty = dict(total=0, up=0, down=0, con_errores=0, danados=0, troncales=0, voz=0, saturados=0, inestables=0,
                  poe_falla=0)
-    stats = {switch_id: dict(empty) for switch_id in switch_ids}
+    stats = {switch_id: dict(empty, opticas=[]) for switch_id in switch_ids}
     for row in rows:
-        stats[row.pop('switch_id')] = dict(row, inestables=0)
+        stats[row.pop('switch_id')] = dict(row, inestables=0, opticas=[])
+    for problem in optic_problems(switch_ids):
+        stats[problem.pop('switch_id')]['opticas'].append(problem)
     flapping = (EventoPuerto.objects.filter(puerto__switch_id__in=switch_ids, momento__gte=now - FLAP_WINDOW)
                 .values('puerto__switch_id', 'puerto_id').annotate(changes=Count('id'))
                 .filter(changes__gte=FLAP_CHANGES))
     for row in flapping:
         stats[row['puerto__switch_id']]['inestables'] += 1
     return stats
+
+
+def optic_problems(switch_ids):
+    """Transceptores fuera de rango: [{switch_id, puerto, nivel, motivos}]."""
+    from .models import Puerto, UmbralOptico
+    from .optics import assess_optic
+    ports = list(Puerto.objects.filter(switch_id__in=switch_ids, optica__isnull=False)
+                 .values('switch_id', 'nombre', 'estado_operativo', 'optica'))
+    if not ports:
+        return []
+    limits = UmbralOptico.actual()
+    problems = []
+    for port in ports:
+        level, reasons, _metrics = assess_optic(dict(port['optica'], oper=port['estado_operativo']), limits)
+        if level != 'ok':
+            problems.append(dict(switch_id=port['switch_id'], puerto=port['nombre'], nivel=level,
+                                 motivos=[r for r in reasons if r['level'] == level]))
+    return problems
 
 
 def _worst(a, b):
@@ -78,7 +98,7 @@ LEGACY_REASON_TYPES = (
     ('No responde', 'snmp'), ('Aún no se ha consultado', 'lectura'), ('Última lectura', 'lectura'),
     ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
     ('errores nuevos', 'errores'), ('dañados', 'errores'), ('inestables', 'inestables'),
-    ('capacidad', 'saturacion'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
+    ('capacidad', 'saturacion'), ('Óptica SFP', 'optica'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
 )
 
 
@@ -154,6 +174,10 @@ def assess(switch, stats, thresholds, now=None):
             value = f" ({component['valor']} °C)" if component.get('valor') is not None else ''
             level = _worst(level, component['estado'])
             reasons.append(_reason(component['estado'], 'hardware', f"{label} {component.get('nombre', '')} {state}{value}".replace('  ', ' ')))
+    for optic in stats.get('opticas', []):
+        level = _worst(level, optic['nivel'])
+        detail = '; '.join(r['text'] for r in optic['motivos'])
+        reasons.append(_reason(optic['nivel'], 'optica', f"Óptica SFP {optic['puerto']}: {detail}"))
     if stats.get('poe_falla'):
         level = _worst(level, 'warning')
         reasons.append(_reason('warning', 'poe', f"{stats['poe_falla']} puerto(s) PoE en falla (el equipo conectado no recibe energía)"))

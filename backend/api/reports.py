@@ -230,12 +230,14 @@ def opticas(params, now):
     from .views import build_optics
     data = build_optics()
     rows = [dict(switch=(item['switch'] or {}).get('nombre') or item['device'], puerto=item['interfaz'],
-                 rx_dbm=item['rx_dbm'], tx_dbm=item['tx_dbm'], temperatura=item['temperatura'],
+                 rx_dbm=item['rx_dbm'], rx_base_dbm=item.get('rx_base_dbm'), tx_dbm=item['tx_dbm'],
+                 temperatura=item['temperatura'], voltaje_v=item.get('voltaje_v'), bias_ma=item.get('bias_ma'),
                  atenuacion=item['atenuacion'], nivel=item['nivel'],
                  motivos='; '.join(reason['text'] for reason in item['motivos'])) for item in data['transceptores']]
     return dict(titulo='Ópticas SFP', descripcion=data['detalle'] or 'Última lectura DOM de cada transceptor.',
-                columnas=[('switch', 'Switch'), ('puerto', 'Interfaz'), ('rx_dbm', 'RX dBm'), ('tx_dbm', 'TX dBm'),
-                          ('temperatura', 'Temp °C'), ('atenuacion', 'Atenuación dB'), ('nivel', 'Nivel'),
+                columnas=[('switch', 'Switch'), ('puerto', 'Interfaz'), ('rx_dbm', 'RX dBm'), ('rx_base_dbm', 'RX base 7 d'),
+                          ('tx_dbm', 'TX dBm'), ('temperatura', 'Temp °C'), ('voltaje_v', 'Voltaje V'),
+                          ('bias_ma', 'Bias mA'), ('atenuacion', 'Atenuación dB'), ('nivel', 'Nivel'),
                           ('motivos', 'Motivos')], filas=rows)
 
 

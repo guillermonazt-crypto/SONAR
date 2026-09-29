@@ -131,7 +131,8 @@ class InfluxWriter:
         """
         ahora = datetime.now(timezone.utc)
         puntos = []
-        for tx in datos["transceptores"]:
+        transceptores = datos.get("transceptores") or []
+        for tx in transceptores:
             atenuacion = None
             if tx.get("tx_dbm") is not None and tx.get("rx_dbm") is not None:
                 atenuacion = round(abs(tx["tx_dbm"] - tx["rx_dbm"]), 2)
@@ -146,7 +147,8 @@ class InfluxWriter:
                 .time(ahora, WritePrecision.S)
             )
             for field, value in (("rx_dbm", tx.get("rx_dbm")), ("tx_dbm", tx.get("tx_dbm")),
-                                 ("temperatura", tx.get("temp_c")), ("atenuacion", atenuacion)):
+                                 ("temperatura", tx.get("temp_c")), ("voltaje_v", tx.get("voltaje_v")),
+                                 ("bias_ma", tx.get("bias_ma")), ("atenuacion", atenuacion)):
                 if value is not None:
                     punto.field(field, value)
 
@@ -156,7 +158,7 @@ class InfluxWriter:
             self.write_api.write(bucket=self.bucket, org=self.org, record=puntos)
 
         log.info(f"[{datos['nombre']}] "
-                 f"{len(datos['transceptores'])} transceptores escritos en InfluxDB")
+                 f"{len(transceptores)} transceptores escritos en InfluxDB")
 
     def cerrar(self) -> None:
         """

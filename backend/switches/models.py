@@ -123,6 +123,9 @@ class Puerto(models.Model):
     # PoE: deliveringPower, searching, fault, disabled…; consumo en milliwatts.
     poe_estado = models.CharField(max_length=20, null=True, blank=True)
     poe_mw = models.IntegerField(null=True, blank=True)
+    # Última lectura DOM del transceptor (RX/TX dBm, °C, V, mA, umbrales del
+    # switch y línea base de RX de 7 días); None si el puerto no tiene óptica.
+    optica = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Puerto"
@@ -169,18 +172,18 @@ class UmbralRol(models.Model):
 
 
 class UmbralOptico(models.Model):
-    """Rangos aceptables de los transceptores SFP (fila única, editable en el admin).
+    """Rangos de respaldo de los transceptores SFP (fila única, editable en el admin).
 
-    Los valores por defecto cubren ópticas 1G/10G comunes (SX/LX/LR); ajústalos
-    a la hoja de datos de tus módulos.
+    Si el switch publica umbrales DOM propios (entSensorThresholdTable) se usan
+    esos; estos valores aplican a las ópticas que no los publican.
     """
-    rx_atencion = models.FloatField(default=-17.0, help_text='RX (dBm) por debajo: atención')
-    rx_riesgo = models.FloatField(default=-20.0, help_text='RX (dBm) por debajo: en riesgo')
+    rx_atencion = models.FloatField(default=-14.0, help_text='RX (dBm) por debajo: atención')
+    rx_riesgo = models.FloatField(default=-17.0, help_text='RX (dBm) por debajo: en riesgo')
     rx_saturacion = models.FloatField(default=0.0, help_text='RX (dBm) por encima: receptor saturado')
     tx_minimo = models.FloatField(default=-9.5, help_text='TX (dBm) por debajo: láser débil')
-    temp_atencion = models.FloatField(default=65.0, help_text='Temperatura (°C) para atención')
+    temp_atencion = models.FloatField(default=70.0, help_text='Temperatura (°C) para atención')
     temp_riesgo = models.FloatField(default=75.0, help_text='Temperatura (°C) en riesgo')
-    caida_rx = models.FloatField(default=3.0, help_text='dB de caída de RX en 24 h que se consideran degradación')
+    caida_rx = models.FloatField(default=2.0, help_text='dB de caída de RX frente a su línea base de 7 días que se consideran degradación')
 
     class Meta:
         verbose_name = "Umbral óptico"

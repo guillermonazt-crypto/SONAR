@@ -96,42 +96,45 @@ class ApiTests(TestCase):
         self.assertEqual(self.client.get(f'/api/switches/{down.pk}/').json()['estado'], 'critical')
 
     def test_optics_levels_and_links_ports(self):
-        from unittest import mock
         from django.core.cache import cache
         from switches.models import UmbralOptico
         cache.clear()
         switch = Switch.objects.create(nombre='SW-CORE', hostname='192.0.2.30', plantel=self.plantel)
-        port = Puerto.objects.create(switch=switch, nombre='TenGigabitEthernet1/1/1', indice=101)
-        base = dict(time='2026-01-01T00:00:00+00:00', atenuacion=None, estado='ok')
-        readings = [
-            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/1', rx_dbm=-3.1, tx_dbm=-2.0, temperatura=35.0, rx_max_24h=-3.0),
-            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/2', rx_dbm=-21.4, tx_dbm=-2.2, temperatura=36.0, rx_max_24h=-8.0),
-            dict(base, device='SW-CORE', interfaz='TenGigabitEthernet1/1/3', rx_dbm=-6.0, tx_dbm=-2.1, temperatura=68.0, rx_max_24h=-6.0),
-            dict(base, device='OTRO', interfaz='Te1/1/1', rx_dbm=None, tx_dbm=-10.0, temperatura=None, rx_max_24h=None, estado='alerta'),
-        ]
+        module = dict(rx=dict(alta_alarma=3.0, alta_aviso=0.0, baja_aviso=-17.0, baja_alarma=-21.0))
+        base = dict(time='2026-01-01T00:00:00+00:00', estado='ok', sin_senal=False, admin='up', umbrales={})
+        ports = {}
+        for index, (name, reading) in enumerate([
+            ('TenGigabitEthernet1/1/1', dict(rx_dbm=-3.1, tx_dbm=-2.0, temperatura=35.0, rx_base_dbm=-3.0)),
+            ('TenGigabitEthernet1/1/2', dict(rx_dbm=-21.4, tx_dbm=-2.2, temperatura=36.0, rx_base_dbm=-8.0, umbrales=module)),
+            ('TenGigabitEthernet1/1/3', dict(rx_dbm=-6.0, tx_dbm=-2.1, temperatura=71.0, rx_base_dbm=-6.0)),
+            ('TenGigabitEthernet1/1/4', dict(rx_dbm=None, tx_dbm=-8.0, temperatura=None, rx_base_dbm=None, estado='alerta')),
+        ], start=1):
+            ports[name] = Puerto.objects.create(switch=switch, nombre=name, indice=100 + index,
+                                                estado_operativo='up', optica=dict(base, **reading))
+        Puerto.objects.create(switch=switch, nombre='GigabitEthernet1/0/1', indice=1)
         self.assertEqual(self.client.get('/api/opticas/').status_code, 403)
         self.client.force_login(self.reader)
-        with mock.patch('api.views.history.optics_snapshot', return_value=readings):
-            data = self.client.get('/api/opticas/').json()
+        data = self.client.get('/api/opticas/').json()
         levels = {item['interfaz']: (item['nivel'], [r['text'] for r in item['motivos']]) for item in data['transceptores']}
+        self.assertEqual(len(levels), 4)
         self.assertEqual(levels['TenGigabitEthernet1/1/1'], ('ok', []))
+        # El umbral del módulo (-21 alarma) manda sobre el global; además cayó frente a su base.
         self.assertEqual(levels['TenGigabitEthernet1/1/2'][0], 'critical')
-        self.assertIn('RX cayó 13.4 dB en 24 h', levels['TenGigabitEthernet1/1/2'][1])
-        self.assertEqual(levels['TenGigabitEthernet1/1/3'], ('warning', ['Temperatura 68 °C (≥ 65)']))
-        self.assertEqual(levels['Te1/1/1'][0], 'warning')
-        self.assertEqual(data['transceptores'][0]['interfaz'], 'TenGigabitEthernet1/1/2')
+        self.assertIn('RX -21.4 dBm (≤ -21, umbral del módulo)', levels['TenGigabitEthernet1/1/2'][1])
+        self.assertIn('RX cayó 13.4 dB frente a su línea base de 7 días (-8.0 dBm)', levels['TenGigabitEthernet1/1/2'][1])
+        self.assertEqual(levels['TenGigabitEthernet1/1/3'], ('warning', ['Temperatura 71 °C (≥ 70, umbral global)']))
+        self.assertEqual(levels['TenGigabitEthernet1/1/4'][0], 'warning')
+        first = data['transceptores'][0]
+        self.assertEqual(first['interfaz'], 'TenGigabitEthernet1/1/2')
+        self.assertEqual((first['niveles']['rx'], first['umbrales']['rx']['origen']), ('critical', 'switch'))
         linked = next(item for item in data['transceptores'] if item['interfaz'] == 'TenGigabitEthernet1/1/1')
-        self.assertEqual((linked['puerto_id'], linked['switch']['nombre']), (port.pk, 'SW-CORE'))
-        self.assertIsNone(next(item for item in data['transceptores'] if item['device'] == 'OTRO')['switch'])
+        self.assertEqual((linked['puerto_id'], linked['switch']['nombre']), (ports['TenGigabitEthernet1/1/1'].pk, 'SW-CORE'))
+        self.assertEqual((linked['atenuacion'], linked['umbrales']['rx']['origen']), (1.1, 'global'))
         # Umbrales editables: bajar la temperatura de atención cambia el nivel.
         UmbralOptico.objects.create(temp_atencion=30)
-        with mock.patch('api.views.history.optics_snapshot', return_value=readings):
-            data = self.client.get('/api/opticas/?refresh=1').json()
+        data = self.client.get('/api/opticas/?refresh=1').json()
         self.assertEqual(data['umbrales']['temp_atencion'], 30)
-        with mock.patch('api.views.history.optics_snapshot', side_effect=OSError('sin influx')):
-            data = self.client.get('/api/opticas/?refresh=1').json()
-        self.assertEqual(data['transceptores'], [])
-        self.assertIn('sin influx', data['detalle'])
+        self.assertEqual(next(i for i in data['transceptores'] if i['interfaz'] == 'TenGigabitEthernet1/1/1')['nivel'], 'warning')
 
     def test_unchanged_api_responses_return_304(self):
         Switch.objects.create(nombre='SW', hostname='192.0.2.40', plantel=self.plantel)

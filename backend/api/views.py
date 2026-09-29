@@ -16,7 +16,7 @@ from switches import backups, discovery
 from switches.models import Alerta, Descubierto, Mantenimiento, Puerto, Respaldo, Switch, UmbralOptico
 from usuarios.audit import differences, registrar, snapshot
 from usuarios.models import Bitacora
-from switches.optics import assess_optic, sort_key as optic_sort_key
+from switches.optics import assess_optic, effective_limits, sort_key as optic_sort_key
 from . import history, reports
 from .search import search as search_devices
 from .history import flux_string  # noqa: F401 (usado por pruebas)
@@ -222,29 +222,28 @@ def csv_cell(value):
 
 
 def build_optics():
-    """Transceptores SFP con su última lectura, nivel y motivos."""
+    """Transceptores SFP con su última lectura DOM, umbrales efectivos, nivel y motivos."""
     limits = UmbralOptico.actual()
-    detail = None
-    try:
-        readings = history.optics_snapshot()
-    except Exception as error:
-        readings, detail = [], f'Lecturas ópticas no disponibles: {error}'
-    switches = {s.nombre: s for s in Switch.objects.select_related('plantel')
-                .filter(nombre__in={r['device'] for r in readings})}
-    ports = {(p.switch_id, p.nombre): p.pk for p in Puerto.objects.filter(switch__in=switches.values())
-             .only('pk', 'switch_id', 'nombre')}
+    ports = (Puerto.objects.filter(optica__isnull=False, switch__activo=True)
+             .select_related('switch__plantel').only(
+                 'pk', 'nombre', 'estado_operativo', 'optica', 'switch__nombre', 'switch__hostname',
+                 'switch__plantel_id', 'switch__plantel__nombre'))
     items = []
-    for reading in readings:
-        level, reasons = assess_optic(reading, limits)
-        switch = switches.get(reading['device'])
+    for port in ports:
+        switch = port.switch
+        reading = dict(port.optica, oper=port.estado_operativo)
+        level, reasons, per_metric = assess_optic(reading, limits)
+        rx, tx = reading.get('rx_dbm'), reading.get('tx_dbm')
         items.append(dict(
-            reading, nivel=level, motivos=reasons,
-            switch=switch and dict(id=switch.pk, nombre=switch.nombre, hostname=switch.hostname,
-                                   plantel=switch.plantel_id, plantel_nombre=switch.plantel.nombre),
-            puerto_id=switch and ports.get((switch.pk, reading['interfaz'])),
+            reading, device=switch.nombre, interfaz=port.nombre,
+            atenuacion=round(abs(tx - rx), 2) if None not in (rx, tx) and not reading.get('sin_senal') else None,
+            umbrales=effective_limits(reading, limits), niveles=per_metric, nivel=level, motivos=reasons,
+            switch=dict(id=switch.pk, nombre=switch.nombre, hostname=switch.hostname,
+                        plantel=switch.plantel_id, plantel_nombre=switch.plantel.nombre),
+            puerto_id=port.pk,
         ))
     items.sort(key=optic_sort_key)
-    return dict(generado=timezone.now().isoformat(), detalle=detail,
+    return dict(generado=timezone.now().isoformat(), detalle=None,
                 umbrales={field: getattr(limits, field) for field in OPTIC_LIMIT_FIELDS},
                 transceptores=items)
 
