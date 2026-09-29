@@ -34,10 +34,49 @@ INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "red_universitaria")
 # ---------------------------------------------------------------------------
 # Configuracion SNMP
 # ---------------------------------------------------------------------------
-SNMP_COMMUNITY = os.getenv("SNMP_COMMUNITY", "public")
+# v2c usa SNMP_COMMUNITY; v3 usa usuario USM con autenticación y cifrado.
+# No hay comunidad por defecto: "public" es la primera que se prueba en un ataque.
+SNMP_VERSION   = os.getenv("SNMP_VERSION", "2c").strip().lower().lstrip("v")
+SNMP_COMMUNITY = os.getenv("SNMP_COMMUNITY", "")
+SNMP_V3_USER       = os.getenv("SNMP_V3_USER", "")
+SNMP_V3_AUTH_KEY   = os.getenv("SNMP_V3_AUTH_KEY", "")
+SNMP_V3_PRIV_KEY   = os.getenv("SNMP_V3_PRIV_KEY", "")
+SNMP_V3_AUTH_PROTO = os.getenv("SNMP_V3_AUTH_PROTOCOL", "sha").lower()
+SNMP_V3_PRIV_PROTO = os.getenv("SNMP_V3_PRIV_PROTOCOL", "aes").lower()
+# Máximo de switches consultados a la vez en un ciclo.
+SNMP_CONCURRENCY = int(os.getenv("SNMP_CONCURRENCY", "20"))
 SNMP_PORT      = int(os.getenv("SNMP_PORT",  "161"))
 SNMP_TIMEOUT   = int(os.getenv("SNMP_TIMEOUT", "2"))
 SNMP_RETRIES   = int(os.getenv("SNMP_RETRIES", "3"))
+
+
+
+def snmp_v3_keys() -> dict:
+    """Argumentos de UsmUserData para el nivel authPriv configurado."""
+    from pysnmp.hlapi.asyncio import (
+        usmHMACSHAAuthProtocol, usmHMAC192SHA256AuthProtocol, usmHMAC384SHA512AuthProtocol,
+        usmAesCfb128Protocol, usmAesCfb256Protocol)
+    auth = {'sha': usmHMACSHAAuthProtocol, 'sha256': usmHMAC192SHA256AuthProtocol,
+            'sha512': usmHMAC384SHA512AuthProtocol}
+    priv = {'aes': usmAesCfb128Protocol, 'aes256': usmAesCfb256Protocol}
+    if SNMP_V3_AUTH_PROTO not in auth or SNMP_V3_PRIV_PROTO not in priv:
+        raise ValueError('SNMP_V3_AUTH_PROTOCOL admite sha/sha256/sha512 y SNMP_V3_PRIV_PROTOCOL aes/aes256')
+    return dict(authKey=SNMP_V3_AUTH_KEY, privKey=SNMP_V3_PRIV_KEY,
+                authProtocol=auth[SNMP_V3_AUTH_PROTO], privProtocol=priv[SNMP_V3_PRIV_PROTO])
+
+
+def validate_snmp() -> None:
+    """Falla al arrancar el worker si las credenciales SNMP están incompletas."""
+    if SNMP_VERSION == '3':
+        if not (SNMP_V3_USER and len(SNMP_V3_AUTH_KEY) >= 8 and len(SNMP_V3_PRIV_KEY) >= 8):
+            raise ValueError('SNMPv3 requiere SNMP_V3_USER y claves SNMP_V3_AUTH_KEY/SNMP_V3_PRIV_KEY de 8+ caracteres')
+        snmp_v3_keys()
+    elif SNMP_VERSION == '2c':
+        if not SNMP_COMMUNITY:
+            raise ValueError('Define SNMP_COMMUNITY en .env (o usa SNMP_VERSION=3)')
+    else:
+        raise ValueError('SNMP_VERSION debe ser 2c o 3')
+
 
 # ---------------------------------------------------------------------------
 # Configuracion del Worker

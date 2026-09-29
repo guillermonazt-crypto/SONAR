@@ -7,7 +7,7 @@ function healthLabel(device) {
   return device.lectura_correcta ? "Lectura válida" : "Sin respuesta";
 }
 
-export default function Monitoring() {
+export default function Monitoring({ focusDevice = null, onFocusHandled = () => {} }) {
   const [devices, setDevices] = useState([]);
   const [ports, setPorts] = useState(null);
   const [error, setError] = useState("");
@@ -60,6 +60,13 @@ export default function Monitoring() {
       setError(exception.message);
     }
   }
+
+  // Llegada desde "Ver puertos" en Resumen: abre directamente ese switch.
+  useEffect(() => {
+    if (!focusDevice) return;
+    showPorts(focusDevice);
+    onFocusHandled();
+  }, [focusDevice]);
 
   useEffect(() => {
     if (!ports || ports.loading) return undefined;

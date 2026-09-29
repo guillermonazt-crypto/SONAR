@@ -94,6 +94,10 @@ class InfluxWriter:
             datos: Diccionario con datos del switch que incluye
                    la lista de interfaces con sus errores
         """
+        ahora = datetime.now(timezone.utc)
+        # Un solo write por switch. El estado va como field, no como tag:
+        # como tag, cada cambio up/down abría una serie nueva en InfluxDB.
+        puntos = []
         for intf in datos["interfaces"]:
             punto = (
                 Point("interfaces")
@@ -101,18 +105,17 @@ class InfluxWriter:
                 .tag("role",      datos["rol"])
                 .tag("site",      datos["sitio"])
                 .tag("interface", intf["nombre"])
-                .tag("status",    intf["estado"])
                 .field("estado", intf["estado"])
-                .field("errores_entrada", intf["errores_entrada"])
-                .field("errores_crc",     intf["errores_crc"])
-                .time(datetime.now(timezone.utc), WritePrecision.S)
+                .time(ahora, WritePrecision.S)
             )
             for field in ('errores_entrada', 'errores_crc', 'errores_salida', 'octetos_entrada', 'octetos_salida'):
                 value = intf.get(field)
                 if value is not None:
                     punto.field(field, value)
+            puntos.append(punto)
 
-            self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
+        if puntos:
+            self.write_api.write(bucket=self.bucket, org=self.org, record=puntos)
 
         log.info(f"[{datos['nombre']}] "
                  f"{len(datos['interfaces'])} interfaces escritas en InfluxDB")
@@ -126,6 +129,8 @@ class InfluxWriter:
             datos: Diccionario con datos del switch que incluye
                    la lista de transceptores con rx_dbm y tx_dbm
         """
+        ahora = datetime.now(timezone.utc)
+        puntos = []
         for tx in datos["transceptores"]:
             atenuacion = None
             if tx.get("tx_dbm") is not None and tx.get("rx_dbm") is not None:
@@ -137,15 +142,18 @@ class InfluxWriter:
                 .tag("role",      datos["rol"])
                 .tag("site",      datos["sitio"])
                 .tag("interface", tx["interfaz"])
-                .tag("status",    tx["estado"])
-                .time(datetime.now(timezone.utc), WritePrecision.S)
+                .field("estado",  tx["estado"])
+                .time(ahora, WritePrecision.S)
             )
             for field, value in (("rx_dbm", tx.get("rx_dbm")), ("tx_dbm", tx.get("tx_dbm")),
                                  ("temperatura", tx.get("temp_c")), ("atenuacion", atenuacion)):
                 if value is not None:
                     punto.field(field, value)
 
-            self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
+            puntos.append(punto)
+
+        if puntos:
+            self.write_api.write(bucket=self.bucket, org=self.org, record=puntos)
 
         log.info(f"[{datos['nombre']}] "
                  f"{len(datos['transceptores'])} transceptores escritos en InfluxDB")

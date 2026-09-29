@@ -1,0 +1,4 @@
+Copia la carpeta SONAR de este zip sobre tu carpeta SONAR (reemplaza 7 archivos de frontend/src,
+uno nuevo: frontend/src/utils/theme.js). Luego en frontend/: pnpm install && pnpm dev
+El botón "☀ Modo claro / ☾ Modo oscuro" está en el encabezado; recuerda la elección en el navegador.
+Los colores se editan en las variables al inicio de frontend/src/styles.css.

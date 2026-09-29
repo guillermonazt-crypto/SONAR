@@ -38,6 +38,7 @@ Activa `.venv` y ejecuta desde la raíz:
 python -m pip install -r requirements.txt
 # Solo para una instalación nueva: copia .env.example a .env.
 # Define SECRET_KEY sin sobrescribir las demás credenciales.
+# En desarrollo local deja DJANGO_DEBUG=true (el valor por defecto ahora es false).
 python backend/manage.py migrate
 # Solo si necesitas crear una cuenta administradora:
 python backend/manage.py createsuperuser
@@ -65,6 +66,9 @@ máquina; si cambia, actualiza `frontend/.env.local` y
 
 INVENTORY_SOURCE=django conecta el worker al mismo inventario que React.
 Para iniciar sondeos reales, cuando estés listo: `python -m sonar.main`.
+El worker exige credenciales SNMP explícitas: `SNMP_COMMUNITY` (v2c) o
+`SNMP_VERSION=3` con `SNMP_V3_USER`, `SNMP_V3_AUTH_KEY` y `SNMP_V3_PRIV_KEY`
+(recomendado). Ya no existe la comunidad `public` por defecto.
 No es necesario iniciar el worker para usar o probar la interfaz.
 Las variables `VITE_*` son públicas: nunca pongas secretos en ellas.
 
@@ -83,6 +87,44 @@ el panel actualiza la lectura cada tres minutos.
 Los datos de voz, CDP, VLAN y DHCP snooping se muestran sólo cuando el equipo los
 publica. Los OID específicos de un fabricante son enriquecimientos opcionales;
 estado, alias, errores y tráfico se obtienen con MIBs estándar.
+
+## Resumen, umbrales y alertas
+
+La pestaña **Resumen** usa un solo endpoint (`/api/resumen/`, caché de 60 s) con el
+estado verde/amarillo/rojo de cada switch, sus motivos, conteos de puertos físicos
+y el histórico de 24 h (CPU, memoria y tráfico total) agrupado por plantel.
+Las reglas viven en `backend/switches/health.py`; los umbrales de CPU y memoria se
+editan por rol (core, distribución, acceso) en el admin Django, en **Umbrales por rol**.
+
+Los errores de puerto se evalúan por ciclo (`errores_nuevos`, `ultimo_error`), no
+por el contador acumulado desde el arranque del equipo.
+
+El worker envía una alerta cuando un switch pasa a rojo y otra cuando se recupera,
+con un cooldown (`ALERT_COOLDOWN_MINUTES`). Canales opcionales en `.env`: correo
+(`ALERT_EMAIL_TO` + `EMAIL_*`), Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
+y webhook de Teams/Slack/Google Chat (`ALERT_WEBHOOK_URL`).
+
+## Producción con Docker
+
+`docker compose up -d --build` levanta Nginx con HTTPS (puertos 80/443), Django con
+gunicorn, el worker, PostgreSQL, InfluxDB y Grafana. InfluxDB y Grafana sólo
+escuchan en `127.0.0.1` del servidor y Grafana ya no admite acceso anónimo.
+Completa en `.env` al menos `SECRET_KEY`, `POSTGRES_PASSWORD`, `INFLUX_ADMIN_PASSWORD`,
+`INFLUX_TOKEN`, `GRAFANA_ADMIN_PASSWORD`, `SONAR_HOSTNAME`, las credenciales SNMP,
+y agrega el nombre del servidor a `DJANGO_ALLOWED_HOSTS` y `https://<nombre>` a
+`DJANGO_CSRF_ORIGINS`. Sin certificados propios (`SONAR_CERTS_DIR` con `sonar.crt`
+y `sonar.key`) se genera uno autofirmado. Crea el administrador con
+`docker compose exec django python backend/manage.py createsuperuser`.
+
+Si el volumen de InfluxDB ya existía, cambiar las variables no rota las
+credenciales anteriores: cámbialas en la interfaz de InfluxDB.
+
+### Retención de InfluxDB
+
+`python scripts/setup_influx_downsampling.py` crea el bucket `<bucket>_15m`
+(400 días) y una tarea que guarda promedios de 15 min. `--read-token` crea un
+token de sólo lectura para Django (`INFLUX_READ_TOKEN`). `--raw-retention-days 14`
+reduce la retención del bucket crudo y **borra** los datos más antiguos.
 
 ## Integración opcional con Zabbix
 
@@ -121,8 +163,9 @@ no que se haya convertido en cero.
 
 ## Datos locales y estructura
 
-`.env`, `backend/db.sqlite3`, `.local-backup/`, scripts/local/, node_modules/ y
-frontend/dist/ están excluidos de Git. Los cambios de esquema se guardan en migraciones.
+`.env`, `backend/db.sqlite3`, `.local-backup/`, scripts/local/, node_modules/,
+frontend/dist/ e `inventory/devices.yaml` están excluidos de Git
+(`inventory/devices.example.yaml` es la plantilla). Los cambios de esquema se guardan en migraciones.
 La base anterior a React está respaldada en `.local-backup/before-react-django.sqlite3`.
 El módulo de settings Django es `config.settings`.
 

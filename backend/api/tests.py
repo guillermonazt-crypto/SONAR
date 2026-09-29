@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from planteles.models import Division, Plantel
 from switches.models import Switch, Puerto
 from switches.services import record_poll
+from api.views import flux_string
 
 class ApiTests(TestCase):
     def setUp(self):
@@ -47,6 +48,19 @@ class ApiTests(TestCase):
         self.assertEqual(client.post('/api/auth/logout/',HTTP_X_CSRFTOKEN=token).status_code,200)
         self.assertIsNone(client.get('/api/auth/session/').json()['user'])
 
+    def test_history_and_zabbix_require_session(self):
+        switch = Switch.objects.create(nombre='SW', hostname='192.0.2.9', plantel=self.plantel)
+        port = Puerto.objects.create(switch=switch, nombre='Gi1/0/1', indice=1)
+        for path in ('/api/integrations/zabbix/', f'/api/switches/{switch.pk}/historial/', f'/api/puertos/{port.pk}/historial/'):
+            self.assertEqual(self.client.get(path).status_code, 403, path)
+        self.client.force_login(self.reader)
+        # Sin InfluxDB responde vacío, pero ya no falla por el import de Puerto.
+        self.assertEqual(self.client.get(f'/api/puertos/{port.pk}/historial/').status_code, 200)
+        self.assertEqual(self.client.get('/api/puertos/9999/historial/').status_code, 404)
+
+    def test_flux_string_escapes_quotes(self):
+        self.assertEqual(flux_string('a"b\\c'), 'a\\"b\\\\c')
+
     def test_inactive_user_cannot_login(self):
         self.editor.is_active=False
         self.editor.save()
@@ -87,3 +101,70 @@ class PollTests(TestCase):
         with self.assertRaises(ValueError): record_poll(self.switch.pk,self.switch.hostname,self.data)
         self.switch.refresh_from_db()
         self.assertIsNone(self.switch.ultima_consulta)
+
+
+class SummaryAndSecurityTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.reader = get_user_model().objects.create_user(username='reader', password='test-password', rol='lector')
+        plantel = Plantel.objects.create(nombre='Apan', division=Division.objects.create(nombre='Escuelas'))
+        self.ok = Switch.objects.create(nombre='SW-OK', hostname='192.0.2.1', plantel=plantel)
+        self.hot = Switch.objects.create(nombre='SW-HOT', hostname='192.0.2.2', plantel=plantel, rol='core')
+        record_poll(self.ok.pk, self.ok.hostname, dict(cpu_5m=10, memoria_usada_pct=40, interfaces=[
+            dict(indice=1, nombre='GigabitEthernet1/0/1', estado='up', errores_crc=5),
+            dict(indice=2, nombre='Vlan1', estado='up')]))
+        record_poll(self.hot.pk, self.hot.hostname, dict(cpu_5m=95, interfaces=[]))
+
+    def test_summary_classifies_devices(self):
+        self.assertEqual(self.client.get('/api/resumen/').status_code, 403)
+        self.client.force_login(self.reader)
+        data = self.client.get('/api/resumen/').json()
+        by_name = {item['nombre']: item for item in data['switches']}
+        self.assertEqual(by_name['SW-HOT']['estado'], 'critical')
+        self.assertIn('CPU en 95% (≥ 90%)', [r['text'] for r in by_name['SW-HOT']['motivos']])
+        self.assertEqual(by_name['SW-OK']['estado'], 'ok')
+        # Vlan1 no es físico y no cuenta.
+        self.assertEqual(by_name['SW-OK']['puertos']['total'], 1)
+        self.assertFalse(data['worker_atrasado'])
+        self.assertEqual(data['umbrales']['core']['cpu_riesgo'], 90)
+
+    def test_thresholds_per_role_and_new_errors(self):
+        from switches.models import UmbralRol
+        UmbralRol.objects.update_or_create(rol='core', defaults=dict(cpu_riesgo=99, cpu_atencion=80))
+        record_poll(self.ok.pk, self.ok.hostname, dict(cpu_5m=10, interfaces=[
+            dict(indice=1, nombre='GigabitEthernet1/0/1', estado='up', errores_crc=8)]))
+        port = Puerto.objects.get(switch=self.ok, indice=1)
+        self.assertEqual(port.errores_nuevos, 3)
+        self.assertIsNotNone(port.ultimo_error)
+        self.client.force_login(self.reader)
+        data = self.client.get('/api/resumen/?refresh=1').json()
+        by_name = {item['nombre']: item for item in data['switches']}
+        self.assertEqual(by_name['SW-HOT']['estado'], 'warning')
+        self.assertEqual(by_name['SW-OK']['estado'], 'warning')
+        self.assertEqual(by_name['SW-OK']['puertos']['con_errores'], 1)
+
+    def test_login_is_throttled(self):
+        for _ in range(5):
+            self.assertEqual(self.client.post('/api/auth/login/', dict(username='reader', password='bad')).status_code, 401)
+        response = self.client.post('/api/auth/login/', dict(username='reader', password='test-password'))
+        self.assertEqual(response.status_code, 429)
+
+    def test_optional_pagination(self):
+        self.client.force_login(self.reader)
+        self.assertIsInstance(self.client.get('/api/switches/').json(), list)
+        page = self.client.get('/api/switches/?page=1&page_size=1').json()
+        self.assertEqual((page['count'], len(page['results'])), (2, 1))
+
+    def test_alert_on_transition_with_cooldown(self):
+        from unittest.mock import patch
+        from switches import alerts
+        message = alerts.evaluate(self.hot.pk)
+        self.assertIn('SW-HOT', message)
+        self.assertIsNone(alerts.evaluate(self.hot.pk))
+        record_poll(self.hot.pk, self.hot.hostname, dict(cpu_5m=5, interfaces=[]))
+        # Recuperación dentro del cooldown: no se reenvía.
+        self.assertIsNone(alerts.evaluate(self.hot.pk))
+        with patch.dict('os.environ', ALERT_WEBHOOK_URL='http://hook.test'), patch.object(alerts, '_post') as post:
+            alerts.send('hola')
+        post.assert_called_once_with('http://hook.test', {'text': 'hola'})

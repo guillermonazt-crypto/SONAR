@@ -29,9 +29,12 @@ if not SECRET_KEY.strip():
     raise ImproperlyConfigured('Configura SECRET_KEY en el entorno o en .env')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
+# Apagado por defecto: en desarrollo local define DJANGO_DEBUG=true en .env.
+DEBUG = os.getenv('DJANGO_DEBUG', 'false').lower() == 'true'
 
 ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,10.128.3.139').split(',')
+# localhost siempre se admite para el healthcheck interno de Docker.
+ALLOWED_HOSTS = list(dict.fromkeys([h.strip() for h in ALLOWED_HOSTS if h.strip()] + ['localhost', '127.0.0.1']))
 
 
 # Application definition
@@ -86,13 +89,28 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.getenv('DJANGO_DB_PATH', str(BASE_DIR / 'db.sqlite3')),
-        'OPTIONS': {'timeout': 20},
+# SQLite por defecto (desarrollo). DJANGO_DB_ENGINE=postgres para producción:
+# admite escrituras concurrentes del worker sin serializarlas.
+if os.getenv('DJANGO_DB_ENGINE', 'sqlite').lower() == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', 'sonar'),
+            'USER': os.getenv('POSTGRES_USER', 'sonar'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
+            'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': 60,
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.getenv('DJANGO_DB_PATH', str(BASE_DIR / 'db.sqlite3')),
+            'OPTIONS': {'timeout': 20},
+        }
+    }
 
 
 # Password validation
@@ -117,9 +135,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es-mx'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Mexico_City'
 
 USE_I18N = True
 
@@ -130,11 +148,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.getenv('DJANGO_STATIC_ROOT', str(BASE_DIR / 'staticfiles'))
 
-# CORS - Permite que React hable con Django
+# CORS - Vite reenvía /api, así que sólo hace falta para el servidor de desarrollo.
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Puerto de React con Vite
-    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 
 # Django REST Framework
@@ -145,11 +164,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # Paginación opcional: sólo con ?page=, para no romper clientes que esperan arreglos.
+    'DEFAULT_PAGINATION_CLASS': 'api.pagination.OptionalPageNumberPagination',
 }
-
-# Idioma y zona horaria
-LANGUAGE_CODE = 'es-mx'
-TIME_ZONE = 'America/Mexico_City'  
 
 # Modelo de usuario personalizado
 AUTH_USER_MODEL = 'usuarios.Usuario'
@@ -158,3 +175,36 @@ CSRF_TRUSTED_ORIGINS = os.getenv('DJANGO_CSRF_ORIGINS', 'http://localhost:5173,h
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+# HTTPS detrás de proxy (Nginx en deploy/). Sólo se activa fuera de DEBUG.
+if os.getenv('DJANGO_BEHIND_PROXY', 'false').lower() == 'true':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+if not DEBUG:
+    SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_HSTS_SECONDS', '31536000'))
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+
+# Caché en disco: compartida entre los procesos de gunicorn (límite de login y
+# resumen). La caché en memoria por defecto sería distinta en cada proceso.
+import tempfile
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': os.getenv('DJANGO_CACHE_DIR', os.path.join(tempfile.gettempdir(), 'sonar-cache')),
+    }
+}
+
+# Correo para alertas (switches/alerts.py). Sin EMAIL_HOST no se envía nada.
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'sonar@localhost')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {'switches': {'handlers': ['console'], 'level': 'INFO'}},
+}

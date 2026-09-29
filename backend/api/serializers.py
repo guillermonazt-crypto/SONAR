@@ -31,5 +31,5 @@ class PuertoSerializer(serializers.ModelSerializer):
         fields = ['id', 'switch', 'nombre', 'descripcion', 'indice', 'estado', 'estado_operativo',
                   'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp',
                   'vlan', 'voice_vlan', 'es_trunk', 'errores_entrada', 'errores_salida',
-                  'errores_crc', 'octetos_entrada', 'octetos_salida',
+                  'errores_crc', 'errores_nuevos', 'ultimo_error', 'octetos_entrada', 'octetos_salida',
                   'actualizado']

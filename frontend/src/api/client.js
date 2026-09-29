@@ -43,4 +43,5 @@ export const api = {
   zabbix: () => request("integrations/zabbix/"),
   portHistory: (id) => request(`puertos/${id}/historial/`),
   switchHistory: (id) => request(`switches/${id}/historial/`),
+  summary: (refresh = false) => request(`resumen/${refresh ? "?refresh=1" : ""}`),
 };

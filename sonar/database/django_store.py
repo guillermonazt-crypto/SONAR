@@ -14,3 +14,17 @@ def record_poll(dispositivo, datos):
             save(dispositivo['django_id'], dispositivo['hostname'], datos)
         finally:
             connections.close_all()
+
+
+def notify_alerts(dispositivo):
+    """Evalúa el switch tras el sondeo y envía la alerta fuera del lock de SQLite."""
+    if 'django_id' not in dispositivo:
+        return
+    from switches.alerts import evaluate, send
+    with _lock:
+        close_old_connections()
+        try:
+            message = evaluate(dispositivo['django_id'])
+        finally:
+            connections.close_all()
+    send(message)

@@ -55,12 +55,27 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_inventory_reloaded_and_writer_closed(self):
         writer = Mock()
-        with patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])):
+        with patch.object(worker, "validate_snmp"), patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])):
             with self.assertRaises(asyncio.CancelledError):
                 await worker.main()
         self.assertEqual(load.call_count, 2)
         self.assertEqual(cycle.await_args_list[1].args[0], [])
         writer.cerrar.assert_called_once()
+
+class ConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cycle_respects_concurrency_limit(self):
+        running = peak = 0
+        async def fake(device, writer):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(.01)
+            running -= 1
+            return True
+        with patch.object(worker, "procesar_switch", fake), patch.object(worker, "SNMP_CONCURRENCY", 2):
+            await worker.ejecutar_ciclo([DEVICE] * 6, Mock())
+        self.assertEqual(peak, 2)
+
 
 class WriterTests(unittest.TestCase):
     def test_line_protocol_omits_unknown_preserves_zero(self):
@@ -74,11 +89,23 @@ class WriterTests(unittest.TestCase):
         writer.escribir_cpu(dict(DATA, cpu_5s=None))
         writer.write_api.write.assert_not_called()
         interface = dict(nombre="Gi1", estado="unknown", errores_entrada=0, errores_salida=None, errores_crc=None)
-        writer.escribir_interfaces(dict(DATA, interfaces=[interface]))
-        line = writer.write_api.write.call_args.kwargs["record"].to_line_protocol()
+        writer.escribir_interfaces(dict(DATA, interfaces=[interface, dict(interface, nombre="Gi2")]))
+        records = writer.write_api.write.call_args.kwargs["record"]
+        self.assertEqual(len(records), 2)
+        line = records[0].to_line_protocol()
+        self.assertNotIn("status=", line)
         self.assertIn('estado="unknown"', line)
         self.assertIn("errores_entrada=0i", line)
         self.assertNotIn("errores_crc=", line)
+
+    def test_snmp_config_requires_credentials(self):
+        with patch.object(config, "SNMP_VERSION", "2c"), patch.object(config, "SNMP_COMMUNITY", ""):
+            with self.assertRaises(ValueError):
+                config.validate_snmp()
+        with patch.object(config, "SNMP_VERSION", "3"), patch.object(config, "SNMP_V3_USER", "sonar"), \
+                patch.object(config, "SNMP_V3_AUTH_KEY", "clave-auth-1"), patch.object(config, "SNMP_V3_PRIV_KEY", "clave-priv-1"):
+            config.validate_snmp()
+            self.assertEqual(type(snmp._auth("x")).__name__, "UsmUserData")
 
     def test_empty_yaml(self):
         with tempfile.TemporaryDirectory() as directory:

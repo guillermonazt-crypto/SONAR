@@ -10,6 +10,7 @@
 from pysnmp.hlapi.asyncio import (
     SnmpEngine,
     CommunityData,
+    UsmUserData,
     UdpTransportTarget,
     ContextData,
     ObjectType,
@@ -24,6 +25,13 @@ from sonar.utils.logger import get_logger
 from sonar.utils import config
 
 log = get_logger(__name__)
+
+
+def _auth(community: str):
+    """Credenciales SNMP según SNMP_VERSION: v3 (USM) o v2c (comunidad)."""
+    if config.SNMP_VERSION == '3':
+        return UsmUserData(config.SNMP_V3_USER, **config.snmp_v3_keys())
+    return CommunityData(community, mpModel=1)
 
 # ---------------------------------------------------------------------------
 # OIDs de Cisco IOS-XE
@@ -126,7 +134,7 @@ async def _get_oid(ip: str, community: str, oid: str) -> str | None:
     """
     errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
         SnmpEngine(),
-        CommunityData(community, mpModel=1),
+        _auth(community),
         await UdpTransportTarget.create((ip, config.SNMP_PORT),
                                        timeout=config.SNMP_TIMEOUT,
                                        retries=config.SNMP_RETRIES),
@@ -152,7 +160,7 @@ async def _walk_oid(ip: str, community: str, oid: str) -> dict:
 
     async for errorIndication, errorStatus, errorIndex, varBinds in walk_cmd(
         SnmpEngine(),
-        CommunityData(community, mpModel=1),
+        _auth(community),
         await UdpTransportTarget.create((ip, config.SNMP_PORT),
                                        timeout=config.SNMP_TIMEOUT,
                                        retries=config.SNMP_RETRIES),
@@ -176,7 +184,7 @@ async def _walk_oid_rows(ip: str, community: str, oid: str) -> list[tuple[list[i
     """Conserva todo el índice de una tabla SNMP para correlacionar ARP/FDB/CDP."""
     rows = []
     async for error_indication, error_status, _error_index, var_binds in walk_cmd(
-        SnmpEngine(), CommunityData(community, mpModel=1),
+        SnmpEngine(), _auth(community),
         await UdpTransportTarget.create((ip, config.SNMP_PORT),
                                         timeout=config.SNMP_TIMEOUT,
                                         retries=config.SNMP_RETRIES),

@@ -42,6 +42,9 @@ class Switch(models.Model):
     ultimo_reinicio = models.DateTimeField(null=True, blank=True)
     modelo = models.CharField(max_length=100, null=True, blank=True)
     firmware = models.CharField(max_length=100, null=True, blank=True)
+    # Último nivel notificado por las alertas del worker (ok/warning/critical).
+    nivel_alerta = models.CharField(max_length=10, default='ok')
+    alerta_enviada = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Switch"
@@ -86,6 +89,11 @@ class Puerto(models.Model):
     errores_crc = models.BigIntegerField(null=True, blank=True)
     errores_entrada = models.BigIntegerField(null=True, blank=True)
     errores_salida  = models.BigIntegerField(null=True, blank=True)
+    # Errores nuevos (entrada+salida+CRC) desde el sondeo anterior: los
+    # contadores SNMP son acumulados desde el arranque del equipo.
+    errores_nuevos  = models.BigIntegerField(null=True, blank=True)
+    ultimo_error    = models.DateTimeField(null=True, blank=True)
+    es_fisico       = models.BooleanField(default=True)
     octetos_entrada = models.BigIntegerField(null=True, blank=True)
     octetos_salida  = models.BigIntegerField(null=True, blank=True)
     actualizado    = models.DateTimeField(auto_now=True)
@@ -98,3 +106,19 @@ class Puerto(models.Model):
 
     def __str__(self):
         return f"{self.switch.nombre} — {self.nombre} [{self.estado}]"
+
+
+class UmbralRol(models.Model):
+    """Umbrales de salud por rol de switch; editables en el admin."""
+    rol = models.CharField(max_length=20, choices=Switch.ROLES, unique=True)
+    cpu_atencion = models.PositiveSmallIntegerField(default=70)
+    cpu_riesgo = models.PositiveSmallIntegerField(default=90)
+    memoria_atencion = models.PositiveSmallIntegerField(default=80)
+    memoria_riesgo = models.PositiveSmallIntegerField(default=90)
+
+    class Meta:
+        verbose_name = "Umbral por rol"
+        verbose_name_plural = "Umbrales por rol"
+
+    def __str__(self):
+        return f"Umbrales {self.get_rol_display()}"

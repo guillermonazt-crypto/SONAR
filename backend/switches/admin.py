@@ -2,7 +2,7 @@
 # pyrefly: ignore [missing-import]
 from django.contrib import admin
 # pyrefly: ignore [missing-import]
-from .models import Switch, Puerto
+from .models import Switch, Puerto, UmbralRol
 
 @admin.register(Switch)
 class SwitchAdmin(admin.ModelAdmin):
@@ -15,3 +15,7 @@ class PuertoAdmin(admin.ModelAdmin):
     list_display  = ['nombre', 'switch', 'estado', 'vlan', 'es_trunk']
     list_filter   = ['estado', 'es_trunk']
     search_fields = ['nombre', 'switch__nombre']
+
+@admin.register(UmbralRol)
+class UmbralRolAdmin(admin.ModelAdmin):
+    list_display = ['rol', 'cpu_atencion', 'cpu_riesgo', 'memoria_atencion', 'memoria_riesgo']
