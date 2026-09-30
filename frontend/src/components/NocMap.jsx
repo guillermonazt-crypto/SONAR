@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { HIDALGO_CENTER } from "../utils/locations";
 import { cssVar } from "../utils/theme";
 
-const LEVEL_COLOR = { critical: "critical", warning: "warning", ok: "ok", none: "faint" };
+const LEVEL_COLOR = { critical: "signal-critical", warning: "signal-warning", ok: "signal-ok", none: "faint" };
 const LEVEL_TEXT = { critical: "Crítico", warning: "Atención", ok: "Sano", none: "Sin equipos" };
 const TILES = {
   light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
@@ -29,6 +29,7 @@ export default function NocMap({ points, theme = "dark", onSelect }) {
       attributionControl: true,
       scrollWheelZoom: false,
     });
+    map.current.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
     L.control.zoom({ position: "bottomright" }).addTo(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     return () => {

@@ -28,9 +28,9 @@ function SiteTile({ site, usage, selected, onSelect }) {
       {site.equipos > 0 && (
         <span className="site-tile-kpis">
           <span><small>Responden</small><b>{site.disponibilidad}%</b></span>
-          <span><small>Puertos activos</small><b>{ports.up}/{ports.total}</b></span>
+          <span><small>Puertos</small><b>{ports.up}/{ports.total}</b></span>
           <span className={site.alertas_sin_reconocer ? "status-critical-text" : ""}>
-            <small>Alertas abiertas</small><b>{site.alertas_abiertas}</b>
+            <small>Alertas</small><b>{site.alertas_abiertas}</b>
           </span>
           <span className={usage?.cpu >= 80 ? "status-warning-text" : ""}>
             <small>CPU</small><b>{usage?.cpu != null ? `${usage.cpu}%` : "—"}</b>

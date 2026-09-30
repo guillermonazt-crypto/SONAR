@@ -177,27 +177,27 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
       )}
       <div className="stats overview-stats">
         <article>
-          <span>SALUD DE LA RED</span>
+          <span>Salud de la red</span>
           <strong>{devices.filter((device) => device.lectura_correcta).length}/{devices.length}</strong>
           <small>switches con lectura válida</small>
         </article>
         <article>
-          <span>EQUIPOS EN RIESGO</span>
+          <span>Equipos en riesgo</span>
           <strong className={countLevel("critical") ? "metric-critical" : ""}>{countLevel("critical")}</strong>
           <small>{countLevel("warning")} más requieren atención</small>
         </article>
         <article>
-          <span>PUERTOS ACTIVOS</span>
+          <span>Puertos activos</span>
           <strong>{totals.up}</strong>
           <small>de {totals.total} físicos observados</small>
         </article>
         <article>
-          <span>PUERTOS CON ERRORES</span>
-          <strong className="metric-damaged">{totals.con_errores}</strong>
+          <span>Puertos con errores</span>
+          <strong className={totals.con_errores ? "metric-warning" : ""}>{totals.con_errores}</strong>
           <small>errores nuevos en 24 h · {totals.danados} marcados dañados</small>
         </article>
         <article>
-          <span>ÚLTIMA LECTURA</span>
+          <span>Última lectura</span>
           <strong className="stat-time">{summary ? timeAgo(summary.ultima_lectura) : "—"}</strong>
           <small>resumen generado {summary ? timeAgo(summary.generado) : "—"}</small>
         </article>

@@ -48,6 +48,9 @@
   --topo-phone: #0a84ff;
   --topo-switch: #8e8e93;
   --glass: #1c1c1ecc;
+  --signal-ok: #30d158;
+  --signal-warning: #ffd60a;
+  --signal-critical: #ff453a;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -92,6 +95,9 @@
   --topo-phone: #0071e3;
   --topo-switch: #86868b;
   --glass: #ffffffcc;
+  --signal-ok: #34c759;
+  --signal-warning: #ffcc00;
+  --signal-critical: #ff3b30;
 }
 
 /* Selección y foco con el acento de SONAR en lugar del azul del navegador. */
@@ -1681,9 +1687,9 @@ button:active:not(:disabled) { transform: scale(0.98); background: var(--surface
 .noc-levels { display: flex; gap: 18px; margin-top: 8px; }
 .level-count { display: inline-flex; align-items: center; gap: 7px; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
 .dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); font-style: normal; }
-.dot-critical { background: var(--critical); }
-.dot-warning { background: var(--warning); }
-.dot-ok { background: var(--ok); }
+.dot-critical { background: var(--signal-critical); }
+.dot-warning { background: var(--signal-warning); }
+.dot-ok { background: var(--signal-ok); }
 .dot-none { background: var(--faint); }
 .noc-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: stretch; }
 .noc-map-panel { position: relative; padding: 0; overflow: hidden; }
@@ -1741,7 +1747,7 @@ button:active:not(:disabled) { transform: scale(0.98); background: var(--surface
 @keyframes incident-flash { 50% { background: color-mix(in srgb, var(--critical) 26%, var(--surface)); } }
 .noc-pulse { animation: noc-pulse 1.8s ease-out infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes noc-pulse { 0% { transform: scale(0.6); opacity: 0.9; } 100% { transform: scale(1.6); opacity: 0; } }
-.leaflet-container { font-family: var(--font); background: var(--surface-3); }
+.noc-map.leaflet-container { font-family: var(--font); background: var(--surface-3); }
 .leaflet-tooltip {
   background: var(--glass);
   color: var(--text);
@@ -1805,3 +1811,34 @@ button:active:not(:disabled) { transform: scale(0.98); background: var(--surface
 }
 .breadcrumb, .sidebar-nav { padding: 0; }
 .breadcrumb button { text-transform: none; letter-spacing: normal; }
+
+/* Ajustes de la estructura. */
+main.content { max-width: none; width: 100%; margin: 0; }
+.view { max-width: 1680px; }
+.topbar-tools { flex-wrap: nowrap; }
+.topbar .global-search { width: 240px; }
+.sidebar-nav button.active { border-color: transparent; }
+.view > .page-heading:first-child h2 { font-size: 34px; font-weight: 700; letter-spacing: -0.03em; }
+.view > .page-heading:first-child { margin: 28px 0 24px; }
+.overview-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.overview-stats article { padding: 18px 20px; }
+.overview-stats strong { font-size: 30px; }
+:root[data-theme="light"] .stats article { border-color: transparent; box-shadow: 0 1px 2px #0000000a, 0 4px 16px #0000000a; }
+.metric-warning { color: var(--warning); }
+.site-tile-kpis small { text-transform: none; letter-spacing: normal; font-size: 11px; }
+.site-tile { border-left-width: 3px; }
+@media (max-width: 1280px) { .overview-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .topbar-tools { flex-wrap: wrap; } }
+@media (max-width: 760px) { .overview-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .topbar .global-search { width: 100%; } }
+.site-board .site-tile-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.overview-stats .stat-time { font-size: 20px; }
+@media (max-width: 760px) {
+  .app-shell .sidebar { flex-direction: row; align-items: center; height: auto; top: 0; padding: 8px 10px; }
+  .app-shell .sidebar .sidebar-brand { flex-direction: row; padding: 0 6px 0 0; }
+  .app-shell .sidebar .sidebar-nav { flex-direction: row; gap: 2px; }
+  .app-shell .sidebar .sidebar-nav button { width: auto; justify-content: center; padding: 8px 10px; position: relative; }
+  .app-shell .sidebar .nav-count { position: absolute; top: 0; right: 0; min-width: 16px; padding: 0 4px; font-size: 10px; }
+  .app-shell .sidebar .sidebar-foot { margin: 0 0 0 auto; padding: 0; border: 0; }
+  .app-shell .topbar { gap: 8px; }
+  .app-shell .topbar-tools { flex-wrap: nowrap; }
+}
