@@ -2,7 +2,7 @@ import { StatusBadge } from "./Status";
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-function SiteTile({ site, selected, onSelect }) {
+function SiteTile({ site, usage, selected, onSelect }) {
   const { niveles: levels, puertos: ports } = site;
   return (
     <button
@@ -32,8 +32,11 @@ function SiteTile({ site, selected, onSelect }) {
           <span className={site.alertas_sin_reconocer ? "status-critical-text" : ""}>
             <small>Alertas abiertas</small><b>{site.alertas_abiertas}</b>
           </span>
-          <span className={ports.con_errores ? "status-warning-text" : ""}>
-            <small>Con errores</small><b>{ports.con_errores}</b>
+          <span className={usage?.cpu >= 80 ? "status-warning-text" : ""}>
+            <small>CPU</small><b>{usage?.cpu != null ? `${usage.cpu}%` : "—"}</b>
+          </span>
+          <span className={usage?.mem >= 85 ? "status-warning-text" : ""}>
+            <small>Memoria</small><b>{usage?.mem != null ? `${usage.mem}%` : "—"}</b>
           </span>
         </span>
       )}
@@ -43,21 +46,20 @@ function SiteTile({ site, selected, onSelect }) {
 }
 
 /** Tablero por plantel: el peor estado de sus equipos, alertas y KPIs; al elegir uno se filtra el análisis. */
-export default function SiteBoard({ sites, selected, onSelect }) {
+export default function SiteBoard({ sites, usage = new Map(), selected, onSelect }) {
   if (!sites.length) return null;
   const withIssues = sites.filter((site) => site.estado === "critical" || site.estado === "warning").length;
   return (
     <section className="card site-board">
       <div className="section-title">
         <div>
-          <span className="eyebrow">PLANTELES</span>
           <h2>Estado por plantel</h2>
         </div>
         <small>{withIssues ? `${withIssues} de ${sites.length} con incidencias` : `${sites.length} planteles sin incidencias`}</small>
       </div>
       <div className="site-board-grid">
         {sites.map((site) => (
-          <SiteTile key={site.id} site={site} selected={selected === site.id} onSelect={onSelect} />
+          <SiteTile key={site.id} site={site} usage={usage.get(site.id)} selected={selected === site.id} onSelect={onSelect} />
         ))}
       </div>
     </section>

@@ -94,6 +94,19 @@ function DeviceCard({ device, limits, onOpenPorts }) {
   );
 }
 
+// CPU y memoria promedio de los switches de cada plantel (para las tarjetas).
+function usageBySite(devices) {
+  const sums = new Map();
+  devices.forEach((device) => {
+    const entry = sums.get(device.plantel) || { cpu: [], mem: [] };
+    if (Number.isFinite(device.cpu_5m)) entry.cpu.push(device.cpu_5m);
+    if (Number.isFinite(device.memoria_usada_pct)) entry.mem.push(device.memoria_usada_pct);
+    sums.set(device.plantel, entry);
+  });
+  const average = (values) => (values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : null);
+  return new Map([...sums].map(([site, entry]) => [site, { cpu: average(entry.cpu), mem: average(entry.mem) }]));
+}
+
 function groupBySite(items) {
   const groups = new Map();
   items.forEach((item) => {
@@ -190,12 +203,11 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
         </article>
       </div>
 
-      <SiteBoard sites={siteBoard} selected={plantel ? Number(plantel) : null} onSelect={(id) => onPlantelChange(id ? String(id) : "")} />
+      <SiteBoard sites={siteBoard} usage={usageBySite(devices)} selected={plantel ? Number(plantel) : null} onSelect={(id) => onPlantelChange(id ? String(id) : "")} />
 
       <section className="card risk-panel">
         <div className="section-title">
           <div>
-            <span className="eyebrow">AHORA</span>
             <h2>Equipos en riesgo</h2>
           </div>
           <button type="button" onClick={() => refresh(true)}>Actualizar</button>
@@ -229,7 +241,6 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
       <section className="card device-analysis">
         <div className="section-title">
           <div>
-            <span className="eyebrow">ANÁLISIS</span>
             <h2>Estado por equipo</h2>
           </div>
           <div className="filter-bar">
@@ -281,26 +292,9 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
         {summary && !visible.length && <p className="empty">{filtered ? "Ningún equipo coincide con los filtros." : "No hay equipos en este estado."}</p>}
       </section>
 
-      <section className="card historical native-monitor">
+      {zabbix?.configured && <section className="card integration-card">
         <div className="section-title">
           <div>
-            <span className="eyebrow">SONAR</span>
-            <h2>Diagnóstico operativo</h2>
-          </div>
-        </div>
-        <p>Esta vista resume el estado actual directamente desde Django y SNMP, sin depender de un dashboard externo.</p>
-        <div className="native-metrics">
-          <span><i className="legend-dot dot-damaged" /> {totals.con_errores} puertos con errores nuevos</span>
-          <span><i className="legend-dot dot-voice" /> {totals.voz} con Voice VLAN</span>
-          <span><i className="legend-dot dot-trunk" /> {totals.troncales} enlaces trunk</span>
-          <span><i className="legend-dot dot-up" /> {totals.up} activos</span>
-          <span><i className="legend-dot dot-unknown" /> {totals.total - totals.up - totals.down} sin lectura</span>
-        </div>
-      </section>
-      <section className="card integration-card">
-        <div className="section-title">
-          <div>
-            <span className="eyebrow">INTEGRACIÓN</span>
             <h2>Zabbix</h2>
           </div>
           <span className={zabbix?.configured && !zabbix.detail ? "health-ok" : "health-bad"}>
@@ -309,7 +303,7 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
         </div>
         <p>{zabbix?.detail || "SONAR puede consultar aquí los hosts y disponibilidad publicados por Zabbix."}</p>
         {zabbix?.hosts?.length > 0 && <small>{zabbix.hosts.length} hosts publicados por Zabbix.</small>}
-      </section>
+      </section>}
     </>
   );
 }
