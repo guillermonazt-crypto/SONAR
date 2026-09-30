@@ -138,7 +138,6 @@ export default function Alerts({ user, plantel = "", onOpenDevice = () => {} }) 
     <>
       <div className="section-title page-heading">
         <div>
-          <span className="eyebrow">OPERACIÓN</span>
           <h2>Centro de alertas</h2>
           <p>Episodios en riesgo, quién los atendió y ventanas de mantenimiento programadas.</p>
         </div>

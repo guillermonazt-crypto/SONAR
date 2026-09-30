@@ -159,7 +159,6 @@ export default function Optics({ plantel = "", onOpenPort = () => {} }) {
     <>
       <div className="section-title page-heading">
         <div>
-          <span className="eyebrow">FIBRA</span>
           <h2>Ópticas SFP</h2>
           <p>Potencia de recepción y transmisión, temperatura y degradación de cada transceptor.</p>
         </div>
