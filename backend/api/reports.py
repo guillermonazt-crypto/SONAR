@@ -19,13 +19,31 @@ def _days(params, default):
         return default
 
 
+def site_id(params):
+    """?plantel=<id> como entero; None (todos) si falta o no es un número."""
+    value = str(params.get('plantel') or '')
+    return int(value) if value.isdigit() else None
+
+
+def _switches(params):
+    switches = Switch.objects.all()
+    site = site_id(params)
+    return switches.filter(plantel_id=site) if site is not None else switches
+
+
+def _ports(params):
+    ports = Puerto.objects.all()
+    site = site_id(params)
+    return ports.filter(switch__plantel_id=site) if site is not None else ports
+
+
 def _port_row(port, **extra):
     return dict(switch=port.switch.nombre, switch_id=port.switch_id, plantel=port.switch.plantel.nombre,
                 puerto=port.nombre, puerto_id=port.pk, descripcion=port.descripcion or '', **extra)
 
 
 def inventario(params, now):
-    switches = list(Switch.objects.select_related('plantel__division'))
+    switches = list(_switches(params).select_related('plantel__division'))
     stats = port_stats([s.pk for s in switches], now)
     thresholds = thresholds_by_role()
     rows = []
@@ -47,7 +65,8 @@ def disponibilidad(params, now):
     days = _days(params, 30)
     since = now - timedelta(days=days)
     total = days * 24 * 60
-    outages = Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now)
+    outages = Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now,
+                                    switch__in=_switches(params))
     down = {}
     for alert in outages:
         if not any(reason_type(reason) == 'snmp' for reason in alert.motivos):
@@ -55,7 +74,7 @@ def disponibilidad(params, now):
         start, end = max(alert.inicio, since), min(alert.fin or now, now)
         down[alert.switch_id] = down.get(alert.switch_id, 0) + max(0, (end - start).total_seconds() / 60)
     rows = []
-    for s in Switch.objects.select_related('plantel').filter(activo=True):
+    for s in _switches(params).select_related('plantel').filter(activo=True):
         minutes = round(down.get(s.pk, 0))
         rows.append(dict(switch=s.nombre, switch_id=s.pk, plantel=s.plantel.nombre, minutos_caido=minutes,
                          disponibilidad=round(100 - minutes * 100 / total, 3)))
@@ -68,7 +87,7 @@ def disponibilidad(params, now):
 
 def puertos_errores(params, now):
     days = _days(params, 7)
-    ports = (Puerto.objects.select_related('switch__plantel')
+    ports = (_ports(params).select_related('switch__plantel')
              .filter(es_fisico=True, ultimo_error__gte=now - timedelta(days=days)).order_by('-ultimo_error'))
     rows = [_port_row(p, entrada=p.errores_entrada, salida=p.errores_salida, crc=p.errores_crc,
                       nuevos=p.errores_nuevos, ultimo_error=p.ultimo_error.isoformat()) for p in ports]
@@ -81,7 +100,7 @@ def puertos_errores(params, now):
 def puertos_sin_uso(params, now):
     days = _days(params, 30)
     limit = now - timedelta(days=days)
-    ports = (Puerto.objects.select_related('switch__plantel')
+    ports = (_ports(params).select_related('switch__plantel')
              .filter(es_fisico=True, es_trunk=False, switch__activo=True).exclude(estado_operativo='up')
              .filter(Q(ultimo_activo__lt=limit) | Q(ultimo_activo__isnull=True)).order_by('switch__nombre', 'indice'))
     rows = [_port_row(p, vlan=p.vlan, sin_enlace_desde=p.ultimo_activo.isoformat() if p.ultimo_activo else 'Sin registro',
@@ -95,10 +114,10 @@ def puertos_sin_uso(params, now):
 
 def puertos_inestables(params, now):
     hours = _days(dict(dias=params.get('horas', 24)), 24)
-    counts = (EventoPuerto.objects.filter(momento__gte=now - timedelta(hours=hours))
+    counts = (EventoPuerto.objects.filter(momento__gte=now - timedelta(hours=hours), puerto__in=_ports(params))
               .values('puerto').annotate(cambios=Count('id')).filter(cambios__gte=FLAP_CHANGES))
     by_port = {row['puerto']: row['cambios'] for row in counts}
-    ports = Puerto.objects.select_related('switch__plantel').filter(pk__in=by_port)
+    ports = _ports(params).select_related('switch__plantel').filter(pk__in=by_port)
     rows = sorted((_port_row(p, cambios=by_port[p.pk], estado=p.estado_operativo,
                              ultimo_cambio=p.ultimo_cambio.isoformat() if p.ultimo_cambio else None) for p in ports),
                   key=lambda row: -row['cambios'])
@@ -109,7 +128,7 @@ def puertos_inestables(params, now):
 
 
 def puertos_saturados(params, now):
-    ports = (Puerto.objects.select_related('switch__plantel').filter(es_fisico=True, uso_pct__gte=70).order_by('-uso_pct'))
+    ports = (_ports(params).select_related('switch__plantel').filter(es_fisico=True, uso_pct__gte=70).order_by('-uso_pct'))
     rows = [_port_row(p, velocidad_mbps=p.velocidad_mbps, uso_pct=p.uso_pct, entrada_bps=p.bps_entrada,
                       salida_bps=p.bps_salida, troncal='Sí' if p.es_trunk else 'No') for p in ports]
     return dict(titulo='Puertos con uso alto (≥ 70 %)', descripcion='Uso calculado entre los dos últimos sondeos.',
@@ -125,7 +144,7 @@ POE_CLASSES = (('capacidad_af', 15.4), ('capacidad_at', 30.0))
 def poe(params, now):
     """Presupuesto, consumo y cuánto margen queda para conectar más equipos PoE."""
     ports = {}
-    for row in (Puerto.objects.filter(es_fisico=True).exclude(poe_estado__isnull=True)
+    for row in (_ports(params).filter(es_fisico=True).exclude(poe_estado__isnull=True)
                 .values('switch', 'poe_estado', 'estado_operativo')):
         counts = ports.setdefault(row['switch'], dict(poe=0, energizados=0, libres=0, falla=0))
         counts['poe'] += 1
@@ -136,7 +155,7 @@ def poe(params, now):
         elif row['estado_operativo'] != 'up':
             counts['libres'] += 1
     rows = []
-    switches = Switch.objects.select_related('plantel').filter(activo=True).filter(
+    switches = _switches(params).select_related('plantel').filter(activo=True).filter(
         Q(poe_presupuesto_w__isnull=False) | Q(pk__in=ports))
     for s in switches:
         counts = ports.get(s.pk, dict(poe=0, energizados=0, libres=0, falla=0))
@@ -171,7 +190,7 @@ def poe(params, now):
 
 def hardware(params, now):
     rows = []
-    for s in Switch.objects.select_related('plantel').exclude(hardware__isnull=True):
+    for s in _switches(params).select_related('plantel').exclude(hardware__isnull=True):
         for item in s.hardware or []:
             rows.append(dict(switch=s.nombre, switch_id=s.pk, plantel=s.plantel.nombre, tipo=item.get('tipo'),
                              componente=item.get('nombre'), estado=item.get('estado'), valor=item.get('valor')))
@@ -182,25 +201,44 @@ def hardware(params, now):
                           ('estado', 'Estado'), ('valor', 'Valor (°C)')], filas=rows)
 
 
+def _poe_w(port):
+    return round(port.poe_mw / 1000, 1) if port.poe_mw is not None else None
+
+
 def topologia(params, now):
+    """Enlaces CDP/LLDP más los teléfonos que sólo se reconocen por su MAC (SEPxxxx).
+
+    Cada fila trae lo que el mapa muestra al hacer clic en un nodo (modelo, MAC, IP,
+    VLAN, PoE) y el uso del puerto para colorear el enlace.
+    """
     by_name = {}
     for s in Switch.objects.all():
         by_name[s.nombre.lower()] = s
         by_name[s.hostname] = s
-    ports = (Puerto.objects.select_related('switch__plantel').exclude(vecino_nombre__isnull=True)
-             .exclude(vecino_nombre='').order_by('switch__nombre', 'indice'))
+    neighbor = ~Q(vecino_nombre__isnull=True) & ~Q(vecino_nombre='')
+    phone_only = Q(vecino_tipo__isnull=True, mac_telefono__isnull=False) & ~Q(mac_telefono='') & ~neighbor
+    ports = _ports(params).select_related('switch__plantel').filter(neighbor | phone_only).order_by('switch__nombre', 'indice')
     rows = []
     for p in ports:
-        short = p.vecino_nombre.split('.')[0].split('(')[0].strip().lower()
-        known = by_name.get(p.vecino_ip or '') or by_name.get(short)
-        rows.append(_port_row(p, vecino=p.vecino_nombre, vecino_puerto=p.vecino_puerto or '',
-                              vecino_tipo=p.vecino_tipo or '', tipo_equipo=p.get_vecino_tipo_display() or '',
-                              plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or '',
-                              vecino_id=known.pk if known else None,
+        if p.vecino_nombre:
+            name, kind = p.vecino_nombre, p.vecino_tipo or ''
+            short = name.split('.')[0].split('(')[0].strip().lower()
+            known = by_name.get(p.vecino_ip or '') or by_name.get(short)
+        else:
+            name, kind, known = p.mac_telefono, 'telefono', None
+        phone = kind == 'telefono'
+        rows.append(_port_row(p, vecino=name, vecino_puerto=p.vecino_puerto or '',
+                              vecino_tipo=kind, tipo_equipo=dict(Puerto.TIPOS_VECINO).get(kind, ''),
+                              plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or p.ip_equipo or '',
+                              mac=(p.mac_telefono if phone and p.mac_telefono else p.mac_equipo) or '',
+                              vlan=p.voice_vlan if phone and p.voice_vlan else p.vlan, poe_w=_poe_w(p),
+                              uso_pct=p.uso_pct, vecino_id=known.pk if known else None,
                               en_inventario='Sí' if known else 'No'))
-    return dict(titulo='Topología (vecinos CDP/LLDP)', descripcion='Enlaces descubiertos por CDP y LLDP entre equipos.',
+    return dict(titulo='Topología (vecinos CDP/LLDP)',
+                descripcion='Enlaces descubiertos por CDP y LLDP entre equipos, con los access points y teléfonos de cada puerto.',
                 columnas=[('switch', 'Switch'), ('puerto', 'Puerto'), ('tipo_equipo', 'Tipo'), ('vecino', 'Vecino'),
                           ('vecino_puerto', 'Puerto del vecino'), ('plataforma', 'Plataforma'), ('vecino_ip', 'IP'),
+                          ('mac', 'MAC'), ('vlan', 'VLAN'), ('poe_w', 'PoE W'), ('uso_pct', 'Uso %'),
                           ('en_inventario', 'En inventario')], filas=rows)
 
 
@@ -212,12 +250,12 @@ def aps_telefonos(params, now):
         query |= Q(vecino_tipo__isnull=True, mac_telefono__isnull=False) & ~Q(mac_telefono='')
     labels = dict(Puerto.TIPOS_VECINO)
     rows = []
-    for p in Puerto.objects.select_related('switch__plantel').filter(query).order_by('switch__nombre', 'indice'):
+    for p in _ports(params).select_related('switch__plantel').filter(query).order_by('switch__nombre', 'indice'):
         kind = p.vecino_tipo or 'telefono'
         rows.append(_port_row(p, vecino_tipo=kind, tipo_equipo=labels[kind], vecino=p.vecino_nombre or p.mac_telefono,
                               plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or '',
                               vlan=p.voice_vlan if kind == 'telefono' and p.voice_vlan else p.vlan,
-                              poe_w=round(p.poe_mw / 1000, 1) if p.poe_mw is not None else None))
+                              poe_w=_poe_w(p)))
     totals = {kind: sum(1 for row in rows if row['vecino_tipo'] == kind) for kind in ('ap', 'telefono')}
     return dict(titulo='Access points y teléfonos IP',
                 descripcion=f"{totals['ap']} access points y {totals['telefono']} teléfonos detectados por CDP/LLDP.",
@@ -228,7 +266,7 @@ def aps_telefonos(params, now):
 
 def opticas(params, now):
     from .views import build_optics
-    data = build_optics()
+    data = build_optics(site_id(params))
     rows = [dict(switch=(item['switch'] or {}).get('nombre') or item['device'], puerto=item['interfaz'],
                  rx_dbm=item['rx_dbm'], rx_base_dbm=item.get('rx_base_dbm'), tx_dbm=item['tx_dbm'],
                  temperatura=item['temperatura'], voltaje_v=item.get('voltaje_v'), bias_ma=item.get('bias_ma'),
@@ -278,9 +316,9 @@ def tendencias(params, now):
     days = _days(params, 7)
     days = min(TREND_DAYS, key=lambda option: abs(option - days))
     since = now - timedelta(days=days)
-    switches = list(Switch.objects.select_related('plantel').filter(activo=True))
+    switches = list(_switches(params).select_related('plantel').filter(activo=True))
     alerts = {}
-    for alert in Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now):
+    for alert in Alerta.objects.filter(Q(fin__isnull=True) | Q(fin__gt=since), inicio__lt=now, switch__in=switches):
         alerts.setdefault(alert.switch_id, []).append(alert)
     detail = None
     try:

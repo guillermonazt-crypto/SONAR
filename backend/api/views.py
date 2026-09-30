@@ -18,6 +18,7 @@ from usuarios.audit import differences, registrar, snapshot
 from usuarios.models import Bitacora
 from switches.optics import assess_optic, effective_limits, sort_key as optic_sort_key
 from . import history, reports
+from .reports import site_id
 from .search import search as search_devices
 from .history import flux_string  # noqa: F401 (usado por pruebas)
 from .permissions import EditorOnlyPermission, InventoryPermission, can_edit
@@ -126,13 +127,16 @@ def switch_history(request, pk=None):
 @requires_session
 def search(request):
     """Buscador global por MAC, IP, descripción de puerto o switch."""
-    return JsonResponse(search_devices(request.GET.get('q', '')))
+    return JsonResponse(search_devices(request.GET.get('q', ''), site_id(request.GET)))
 
 
-def build_summary(now=None):
-    """Estado, motivos, conteos de puertos e histórico de todos los switches y planteles."""
+def build_summary(now=None, plantel=None):
+    """Estado, motivos, conteos de puertos e histórico de los switches y planteles (todos o uno)."""
     now = now or timezone.now()
-    switches = list(Switch.objects.select_related('plantel__division').all())
+    switches = Switch.objects.select_related('plantel__division').all()
+    if plantel is not None:
+        switches = switches.filter(plantel_id=plantel)
+    switches = list(switches)
     stats = port_stats([s.pk for s in switches], now)
     thresholds = thresholds_by_role()
     detail = None
@@ -141,7 +145,7 @@ def build_summary(now=None):
     except Exception as error:
         histories, detail = {}, f'Histórico no disponible: {error}'
     alerts = {}
-    for alert in Alerta.objects.filter(fin__isnull=True).order_by('inicio'):
+    for alert in Alerta.objects.filter(fin__isnull=True, switch__in=switches).order_by('inicio'):
         # Sólo debería haber una abierta por switch; si hubiera más, cuenta la primera.
         alerts.setdefault(alert.switch_id, alert)
     items = []
@@ -154,22 +158,24 @@ def build_summary(now=None):
                           alerta=alert and dict(id=alert.pk, desde=alert.inicio.isoformat(),
                                                 reconocida=alert.reconocida_en is not None),
                           historial=histories.get(switch.nombre, [])))
-    last = Switch.objects.filter(activo=True).aggregate(last=Max('ultima_consulta'))['last']
+    last = Switch.objects.filter(activo=True, pk__in=[s.pk for s in switches]).aggregate(last=Max('ultima_consulta'))['last']
     return dict(
         generado=now.isoformat(),
         ultima_lectura=last.isoformat() if last else None,
         worker_atrasado=bool(items) and (last is None or (now - last).total_seconds() > STALE_MINUTES * 60),
         umbrales=thresholds,
         historial_detalle=detail,
-        planteles=site_summary(switches, items, alerts.values(), now),
+        planteles=site_summary(switches, items, alerts.values(), now, plantel),
         switches=items,
     )
 
 
-def site_summary(switches, items, open_alerts, now):
-    """Tablero por plantel: todos los planteles activos y los que tienen equipos."""
+def site_summary(switches, items, open_alerts, now, plantel=None):
+    """Tablero por plantel: todos los planteles activos y los que tienen equipos (o sólo el elegido)."""
     used = {s.plantel_id for s in switches}
     places = Plantel.objects.select_related('division').filter(Q(activo=True) | Q(pk__in=used))
+    if plantel is not None:
+        places = places.filter(pk=plantel)
     site_of = {s.pk: s.plantel_id for s in switches}
     by_site = {}
     for alert in open_alerts:
@@ -183,11 +189,13 @@ def site_summary(switches, items, open_alerts, now):
 @require_GET
 @requires_session
 def summary(request):
-    """Un solo request para la vista Resumen, cacheado un ciclo del worker."""
-    data = cache.get('sonar-summary')
+    """Un solo request para la vista Resumen (?plantel=<id> opcional), cacheado un ciclo del worker."""
+    plantel = site_id(request.GET)
+    key = f'sonar-summary:{plantel or "all"}'
+    data = cache.get(key)
     if data is None or request.GET.get('refresh') == '1':
-        data = build_summary()
-        cache.set('sonar-summary', data, SUMMARY_CACHE_SECONDS)
+        data = build_summary(plantel=plantel)
+        cache.set(key, data, SUMMARY_CACHE_SECONDS)
     return JsonResponse(data)
 
 
@@ -221,10 +229,13 @@ def csv_cell(value):
     return value
 
 
-def build_optics():
+def build_optics(plantel=None):
     """Transceptores SFP con su última lectura DOM, umbrales efectivos, nivel y motivos."""
     limits = UmbralOptico.actual()
-    ports = (Puerto.objects.filter(optica__isnull=False, switch__activo=True)
+    ports = Puerto.objects.filter(optica__isnull=False, switch__activo=True)
+    if plantel is not None:
+        ports = ports.filter(switch__plantel_id=plantel)
+    ports = (ports
              .select_related('switch__plantel').only(
                  'pk', 'nombre', 'estado_operativo', 'optica', 'switch__nombre', 'switch__hostname',
                  'switch__plantel_id', 'switch__plantel__nombre'))
@@ -255,6 +266,10 @@ def optics(request):
     if data is None or request.GET.get('refresh') == '1':
         data = build_optics()
         cache.set('sonar-optics', data, OPTICS_CACHE_SECONDS)
+    plantel = site_id(request.GET)
+    if plantel is not None:
+        # Se filtra la copia cacheada de toda la red: un solo caché para todos los planteles.
+        data = dict(data, transceptores=[item for item in data['transceptores'] if item['switch']['plantel'] == plantel])
     return JsonResponse(data)
 
 
@@ -299,6 +314,14 @@ class SwitchViewSet(InventoryViewSet):
     audit_object = 'switch'
     queryset = Switch.objects.select_related('plantel').all()
     serializer_class = SwitchSerializer
+
+    def get_queryset(self):
+        """?plantel=<id> filtra el listado; el detalle y la edición no se restringen."""
+        switches = super().get_queryset()
+        plantel = site_id(self.request.query_params)
+        if self.action == 'list' and plantel is not None:
+            switches = switches.filter(plantel_id=plantel)
+        return switches
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -373,6 +396,9 @@ class AlertaViewSet(LimitedListMixin, viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def resumen(self, request):
         open_alerts = Alerta.objects.filter(fin__isnull=True)
+        plantel = site_id(request.query_params)
+        if plantel is not None:
+            open_alerts = open_alerts.filter(switch__plantel_id=plantel)
         return Response(dict(abiertas=open_alerts.count(),
                              sin_reconocer=open_alerts.filter(reconocida_en__isnull=True).count()))
 
@@ -400,6 +426,9 @@ class MantenimientoViewSet(AuditedMixin, viewsets.ModelViewSet):
         windows = super().get_queryset()
         if self.request.query_params.get('vigentes') == '1':
             windows = windows.filter(fin__gt=timezone.now())
+        plantel = site_id(self.request.query_params)
+        if plantel is not None:
+            windows = windows.filter(Q(plantel_id=plantel) | Q(switch__plantel_id=plantel))
         return windows
 
     def perform_create(self, serializer):

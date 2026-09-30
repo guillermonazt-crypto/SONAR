@@ -46,13 +46,17 @@ def _port_match(port, query, mac):
     return 'descripcion', port.descripcion, False
 
 
-def search(query):
+def search(query, plantel=None):
     query = (query or '').strip()
     if len(query) < MIN_LENGTH:
         return dict(query=query, puertos=[], switches=[])
     is_ip = bool(IP_PARTIAL.match(query))
     mac = '' if is_ip else compact_mac(query)
     ports = Puerto.objects.filter(es_fisico=True).select_related('switch__plantel')
+    switches = Switch.objects.select_related('plantel')
+    if plantel is not None:
+        ports = ports.filter(switch__plantel_id=plantel)
+        switches = switches.filter(plantel_id=plantel)
     if is_ip:
         filters = Q(ip_equipo__contains=query)
     else:
@@ -74,7 +78,7 @@ def search(query):
         ))
     # Coincidencias exactas primero; los troncales al final (ahí aparecen MACs de otros switches).
     results.sort(key=lambda item: (not item['exacto'], item['es_trunk'], item['coincide'] == 'descripcion', item['switch']['nombre'], item['nombre']))
-    switches = (Switch.objects.select_related('plantel')
+    switches = (switches
                 .filter(Q(nombre__icontains=query) | Q(hostname__contains=query))[:10])
     return dict(
         query=query,
