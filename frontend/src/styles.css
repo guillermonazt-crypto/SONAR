@@ -39,6 +39,9 @@
   --face-bottom: #14161d;
   --face-inset: #171a21;
   --grid-line: #262b38;
+  --topo-ap: #3ddc84;
+  --topo-phone: #4d9dff;
+  --topo-switch: #8d98aa;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -79,6 +82,9 @@
   --face-bottom: #e4e9f0;
   --face-inset: #ffffff;
   --grid-line: #e3e8ef;
+  --topo-ap: #13804a;
+  --topo-phone: #1f6fd1;
+  --topo-switch: #677387;
 }
 
 /* Selección y foco con el acento de SONAR en lugar del azul del navegador. */
@@ -1194,12 +1200,61 @@ a.button {
 .inline-field { display: inline-flex; align-items: center; gap: 8px; margin: 0; text-transform: none; letter-spacing: normal; font-size: 12px; }
 .inline-field input { width: 80px; margin: 0; padding: 7px 8px; }
 .report-count { color: var(--muted); font-size: 12px; margin: 12px 0 8px; }
-.topology-map { display: block; width: 100%; max-height: 560px; margin: 12px 0; }
+.topology { margin: 12px 0; }
+.topology-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 20px; }
+.topology-legend, .topology-toggles { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; color: var(--muted); }
+.topology-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.topology-legend-item i { font-style: normal; }
+.topology-legend-item.topology-kind-ap i { color: var(--topo-ap); }
+.topology-legend-item.topology-kind-telefono i { color: var(--topo-phone); }
+.topology-legend-item.topology-kind-switch i { color: var(--topo-switch); }
+.topology-legend-line { display: inline-block; width: 22px; height: 0; border-top: 3px solid var(--accent-line); }
+.topology-legend-line.saturated { border-color: var(--critical); }
+.topology-legend-line.attention { border-color: var(--warning); }
+.topology-legend-line.external { border-top: 3px dashed var(--faint); }
+.topology-toggles input { width: auto; margin: 0; }
+.topology-body { display: flex; gap: 16px; align-items: flex-start; }
+.topology-map { display: block; flex: 1; min-width: 0; width: 100%; max-height: 640px; margin: 12px 0; }
 .topology-link { stroke: var(--accent-line); stroke-width: 1.5; }
-.topology-node { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
-.topology-node.external { fill: var(--faint); }
-.topology-label { fill: var(--text-2); font-size: 11px; }
-.topology-icon { font-size: 11px; pointer-events: none; }
+.topology-link.leaf { stroke: var(--border-heavy); stroke-width: 1; }
+.topology-link.attention { stroke: var(--warning); stroke-width: 2.5; }
+.topology-link.saturated { stroke: var(--critical); stroke-width: 3; }
+.topology-node { fill: var(--surface-2); stroke: var(--topo-switch); stroke-width: 2; }
+.topology-node.external { stroke: var(--faint); stroke-dasharray: 3 2; }
+.topology-kind-ap .topology-node { fill: var(--surface-2); stroke: var(--topo-ap); }
+.topology-kind-telefono .topology-node { fill: var(--surface-2); stroke: var(--topo-phone); }
+.topology-node-group { cursor: pointer; outline: none; }
+.topology-node-group:hover .topology-node, .topology-node-group:focus-visible .topology-node { stroke-width: 3; }
+.topology-node-group.selected .topology-node { stroke-width: 4; fill: var(--accent-soft); }
+.topology-label { fill: var(--text-2); font-size: 11px; pointer-events: none; }
+.topology-label.small { font-size: 9px; fill: var(--muted); }
+.topology-icon { font-size: 13px; pointer-events: none; }
+.topology-icon.small { font-size: 9px; }
+.topology-kind-ap .topology-icon { fill: var(--topo-ap); }
+.topology-kind-telefono .topology-icon { fill: var(--topo-phone); }
+.topology-kind-switch .topology-icon { fill: var(--topo-switch); }
+.topology-detail { flex: 0 0 260px; margin-top: 12px; padding: 14px; border: 1px solid var(--border-strong); border-left: 4px solid var(--topo-switch); border-radius: 8px; background: var(--surface-2); }
+.topology-detail.topology-kind-ap { border-left-color: var(--topo-ap); }
+.topology-detail.topology-kind-telefono { border-left-color: var(--topo-phone); }
+.topology-detail header { display: flex; align-items: center; gap: 10px; border: 0; padding: 0; margin-bottom: 10px; }
+.topology-detail header div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.topology-detail header small { margin: 0; }
+.topology-detail-icon { font-size: 20px; }
+.topology-detail dl { display: grid; gap: 6px; margin: 0 0 12px; font-size: 12px; }
+.topology-detail dl div { display: flex; justify-content: space-between; gap: 10px; }
+.topology-detail dt { color: var(--muted); }
+.topology-detail dd { margin: 0; text-align: right; overflow-wrap: anywhere; color: var(--text); }
+@media (max-width: 760px) {
+  .topology-body { flex-direction: column; }
+  .topology-detail { flex-basis: auto; width: 100%; box-sizing: border-box; }
+}
+.site-picker { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 0 auto; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.site-picker select { width: auto; max-width: 240px; margin: 0; padding: 7px 8px; text-transform: none; letter-spacing: normal; }
+.site-picker + .global-search { margin-left: 0; }
+@media (max-width: 760px) {
+  .site-picker { width: 100%; margin-left: 0; }
+  .site-picker select { flex: 1; max-width: none; }
+}
 .neighbor-type { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .neighbor-type > span[aria-hidden] { width: 1.2em; text-align: center; }
 .neighbor-ap > span[aria-hidden] { color: var(--accent); }

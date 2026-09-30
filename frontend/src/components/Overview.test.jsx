@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import Overview from "./Overview";
 import { api } from "../api/client";
 
@@ -41,7 +41,7 @@ describe("Overview", () => {
     expect(onOpenPorts).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
   });
 
-  it("muestra el tablero por plantel y filtra el análisis al elegir uno", async () => {
+  it("muestra el tablero por plantel y al elegir uno cambia el plantel global", async () => {
     const site = (id, nombre, estado, extra = {}) => ({
       id, nombre, division: "Escuelas", estado, equipos: 1, inactivos: 0,
       niveles: { ok: estado === "ok" ? 1 : 0, warning: 0, critical: estado === "critical" ? 1 : 0 },
@@ -62,21 +62,26 @@ describe("Overview", () => {
       ],
     });
     api.zabbix.mockResolvedValue({ configured: false, hosts: [] });
-    render(<Overview />);
+    const onPlantelChange = vi.fn();
+    const { unmount } = render(<Overview onPlantelChange={onPlantelChange} />);
     const board = (await screen.findByRole("heading", { name: "Estado por plantel" })).closest("section");
+    expect(api.summary).toHaveBeenCalledWith(false, "");
     expect(within(board).getByText("1 de 3 con incidencias")).toBeInTheDocument();
     expect(within(board).getByText("Sin equipos")).toBeInTheDocument();
     expect(within(board).getByText("En mantenimiento")).toBeInTheDocument();
-    const analysis = screen.getByRole("heading", { name: "Estado por equipo" }).closest("section");
     fireEvent.click(within(board).getByRole("button", { name: /^Apan/ }));
-    expect(within(analysis).getByText("SW-OK")).toBeInTheDocument();
-    expect(within(analysis).queryByText("SW-CAIDO")).not.toBeInTheDocument();
-    expect(within(analysis).getByRole("button", { name: "Todos (1)" })).toBeInTheDocument();
-    fireEvent.click(within(analysis).getByRole("button", { name: "Limpiar filtros" }));
-    expect(within(analysis).getByText("SW-CAIDO")).toBeInTheDocument();
+    expect(onPlantelChange).toHaveBeenLastCalledWith("1");
+    unmount();
+    // Con un plantel global elegido se pide el resumen de ese plantel y su tarjeta queda marcada.
+    render(<Overview plantel="1" onPlantelChange={onPlantelChange} />);
+    await waitFor(() => expect(api.summary).toHaveBeenLastCalledWith(false, "1"));
+    const tile = await screen.findByRole("button", { name: /^Apan/ });
+    expect(tile).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(tile);
+    expect(onPlantelChange).toHaveBeenLastCalledWith("");
   });
 
-  it("combina filtros por plantel y tipo de problema y los recuerda al volver", async () => {
+  it("filtra por tipo de problema y lo recuerda al volver", async () => {
     api.summary.mockResolvedValue({
       generado: now, ultima_lectura: now, worker_atrasado: false,
       umbrales: { core: limits, distribution: limits, access: limits },

@@ -1,3 +1,5 @@
+import { queryString } from "../utils/site";
+
 let csrfToken = "";
 // Última respuesta GET por ruta. Si el refresco trae exactamente lo mismo
 // (normalmente un 304 revalidado por ETag), se devuelve el mismo objeto y
@@ -51,7 +53,8 @@ export const api = {
   session: () => request("auth/session/"),
   login: (data) => request("auth/login/", { method: "POST", data, form: true }),
   logout: () => request("auth/logout/", { method: "POST" }),
-  list: (resource) => request(`${resource}/`),
+  // params: {plantel} u otros filtros; los vacíos se omiten.
+  list: (resource, params = {}) => request(`${resource}/${queryString(params)}`),
   save: (resource, data, id) =>
     request(`${resource}/${id ? `${id}/` : ""}`, {
       method: id ? "PATCH" : "POST",
@@ -61,9 +64,9 @@ export const api = {
   zabbix: () => request("integrations/zabbix/"),
   portHistory: (id) => request(`puertos/${id}/historial/`),
   switchHistory: (id) => request(`switches/${id}/historial/`),
-  summary: (refresh = false) => request(`resumen/${refresh ? "?refresh=1" : ""}`),
-  optics: (refresh = false) => request(`opticas/${refresh ? "?refresh=1" : ""}`),
-  search: (query) => request(`buscar/?q=${encodeURIComponent(query)}`),
+  summary: (refresh = false, plantel = "") => request(`resumen/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
+  optics: (refresh = false, plantel = "") => request(`opticas/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
+  search: (query, plantel = "") => request(`buscar/${queryString({ q: query, plantel })}`),
   // filters: {plantel, tipo, estado: "abiertas" | "cerradas"}; los vacíos se omiten.
   alerts: (open = false, filters = {}) => {
     const params = new URLSearchParams(open ? { estado: "abiertas" } : { limit: "100" });
@@ -72,9 +75,9 @@ export const api = {
     });
     return request(`alertas/?${params}`);
   },
-  alertSummary: () => request("alertas/resumen/"),
+  alertSummary: (plantel = "") => request(`alertas/resumen/${queryString({ plantel })}`),
   acknowledge: (id, nota) => request(`alertas/${id}/reconocer/`, { method: "POST", data: { nota } }),
-  maintenances: () => request("mantenimientos/?vigentes=1"),
+  maintenances: (plantel = "") => request(`mantenimientos/${queryString({ vigentes: "1", plantel })}`),
   saveMaintenance: (data) => request("mantenimientos/", { method: "POST", data }),
   deleteMaintenance: (id) => request(`mantenimientos/${id}/`, { method: "DELETE" }),
   auditLog: () => request("bitacora/?limit=200"),

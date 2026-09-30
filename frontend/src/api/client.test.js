@@ -33,4 +33,27 @@ describe("request", () => {
     expect(fetch.mock.calls[0][0]).toBe("/api/alertas/?estado=abiertas&tipo=cpu");
     expect(fetch.mock.calls[1][0]).toBe("/api/alertas/?limit=100&plantel=4&estado=cerradas");
   });
+
+  it("pasa el plantel global a los listados, resumen, ópticas, búsqueda y mantenimientos", async () => {
+    const fetch = vi.fn(() => reply([]));
+    vi.stubGlobal("fetch", fetch);
+    await api.list("switches", { plantel: "3" });
+    await api.list("planteles");
+    await api.summary(true, "3");
+    await api.summary(false, "");
+    await api.optics(false, 3);
+    await api.search("aa:bb", "3");
+    await api.alertSummary("3");
+    await api.maintenances("3");
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/api/switches/?plantel=3",
+      "/api/planteles/",
+      "/api/resumen/?refresh=1&plantel=3",
+      "/api/resumen/",
+      "/api/opticas/?plantel=3",
+      "/api/buscar/?q=aa%3Abb&plantel=3",
+      "/api/alertas/resumen/?plantel=3",
+      "/api/mantenimientos/?vigentes=1&plantel=3",
+    ]);
+  });
 });

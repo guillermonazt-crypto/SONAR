@@ -4,6 +4,7 @@ import GlobalSearch from "./components/GlobalSearch";
 import Login from "./components/Login";
 import RefreshControl from "./components/RefreshControl";
 import { useAutoRefresh } from "./utils/refresh";
+import { loadSite, saveSite } from "./utils/site";
 import { setTheme, useTheme } from "./utils/theme";
 import { clearView, loadView, saveView } from "./utils/viewState";
 
@@ -23,12 +24,20 @@ export default function App() {
     [error, setError] = useState(""),
     [tab, setTab] = useState(() => (TABS.includes(loadView("tab")) ? loadView("tab") : "monitoring")),
     [focus, setFocus] = useState(null),
-    [pendingAlerts, setPendingAlerts] = useState(0);
+    [pendingAlerts, setPendingAlerts] = useState(0),
+    // Plantel global: filtra todas las pestañas y se recuerda al recargar ("" = todos).
+    [plantel, setPlantelState] = useState(loadSite),
+    [sites, setSites] = useState([]);
   const theme = useTheme();
+  function setPlantel(value) {
+    const next = value ? String(value) : "";
+    saveSite(next);
+    setPlantelState(next);
+  }
   // Alertas abiertas sin atender: se muestran junto a la pestaña Alertas.
   async function loadAlerts() {
     try {
-      const summary = await api.alertSummary();
+      const summary = await api.alertSummary(plantel);
       setPendingAlerts(summary?.sin_reconocer || 0);
     } catch {
       // El contador es informativo; la pestaña muestra el error si lo hay.
@@ -36,6 +45,16 @@ export default function App() {
   }
   useEffect(() => {
     if (user) loadAlerts();
+  }, [user, plantel]);
+  useEffect(() => {
+    if (!user) return;
+    api.list("planteles")
+      .then((items) => {
+        setSites(items);
+        // Un plantel guardado que ya no existe no debe dejar todo vacío.
+        if (plantel && !items.some((item) => String(item.id) === plantel)) setPlantel("");
+      })
+      .catch(() => {});
   }, [user]);
   useAutoRefresh(loadAlerts, Boolean(user));
 
@@ -130,7 +149,17 @@ export default function App() {
                 )}
               </button>
             ))}
-            <GlobalSearch onOpen={openDevice} />
+            <div className="site-picker">
+              <span aria-hidden="true">Plantel</span>
+              <select aria-label="Filtrar todo por plantel" value={plantel} onChange={(event) => setPlantel(event.target.value)}>
+                <option value="">Todos</option>
+                {plantel && !sites.some((item) => String(item.id) === plantel) && <option value={plantel}>Plantel {plantel}</option>}
+                {[...sites].sort((a, b) => a.nombre.localeCompare(b.nombre)).map((item) => (
+                  <option key={item.id} value={String(item.id)}>{item.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <GlobalSearch onOpen={openDevice} plantel={plantel} />
             {user.is_staff && (
               <a href="/admin/" target="_blank" rel="noreferrer">
                 Administración Django ↗
@@ -147,17 +176,17 @@ export default function App() {
             }
           >
           {tab === "monitoring" ? (
-            <Monitoring focus={focus} onFocusHandled={() => setFocus(null)} />
+            <Monitoring key={plantel} plantel={plantel} focus={focus} onFocusHandled={() => setFocus(null)} />
           ) : tab === "overview" ? (
-            <Overview onOpenPorts={(device) => openDevice(device)} />
+            <Overview key={plantel} plantel={plantel} onPlantelChange={setPlantel} onOpenPorts={(device) => openDevice(device)} />
           ) : tab === "reports" ? (
-            <Reports onOpenPort={openDevice} />
+            <Reports key={plantel} plantel={plantel} onOpenPort={openDevice} />
           ) : tab === "alerts" ? (
-            <Alerts user={user} onOpenDevice={(device) => openDevice(device)} />
+            <Alerts key={plantel} plantel={plantel} user={user} onOpenDevice={(device) => openDevice(device)} />
           ) : tab === "optics" ? (
-            <Optics onOpenPort={openDevice} />
+            <Optics key={plantel} plantel={plantel} onOpenPort={openDevice} />
           ) : tab === "inventory" ? (
-            <Inventory user={user} />
+            <Inventory key={plantel} plantel={plantel} user={user} />
           ) : (
             <section className="card">
               <h2>Dashboards de red</h2>

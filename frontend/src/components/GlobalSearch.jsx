@@ -6,7 +6,7 @@ const MATCH_LABEL = { ip: "IP", mac: "MAC", telefono: "MAC teléfono", descripci
 const STATUS = { up: "Activo", down: "Inactivo" };
 
 /** Buscador global: ¿en qué switch y puerto está conectado este equipo? */
-export default function GlobalSearch({ onOpen }) {
+export default function GlobalSearch({ onOpen, plantel = "" }) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -24,7 +24,7 @@ export default function GlobalSearch({ onOpen }) {
     const timer = setTimeout(async () => {
       const id = ++latest.current;
       try {
-        const data = await api.search(text);
+        const data = await api.search(text, plantel);
         // Sólo cuenta la respuesta de lo último que se escribió.
         if (id === latest.current) {
           setResult(data);
@@ -35,7 +35,7 @@ export default function GlobalSearch({ onOpen }) {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, plantel]);
 
   useEffect(() => {
     const closeOutside = (event) => {

@@ -20,10 +20,11 @@ describe("GlobalSearch", () => {
       ],
     });
     const onOpen = vi.fn();
-    render(<GlobalSearch onOpen={onOpen} />);
+    render(<GlobalSearch onOpen={onOpen} plantel="1" />);
     fireEvent.change(screen.getByLabelText("Buscar equipo por MAC, IP o switch"), { target: { value: "0050.56ab" } });
     const first = await screen.findByRole("button", { name: /SW-APAN · Gi1\/0\/5/ });
-    expect(api.search).toHaveBeenCalledWith("0050.56ab");
+    // La búsqueda respeta el plantel global.
+    expect(api.search).toHaveBeenCalledWith("0050.56ab", "1");
     expect(first).toHaveTextContent("VLAN 20");
     expect(first).toHaveTextContent("Apan");
     expect(screen.getByRole("button", { name: /Gi1\/0\/48/ })).toHaveTextContent("troncal");

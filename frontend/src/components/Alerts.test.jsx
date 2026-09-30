@@ -27,17 +27,20 @@ beforeEach(() => {
 });
 
 describe("Alerts", () => {
-  it("filtra por plantel y tipo, y recuerda los filtros", async () => {
-    const { unmount } = render(<Alerts user={{ can_edit: false }} />);
+  it("usa el plantel global, filtra por tipo y recuerda los filtros", async () => {
+    const { unmount } = render(<Alerts user={{ can_edit: true }} plantel="1" />);
     await screen.findAllByText("No responde a SNMP");
-    fireEvent.change(await screen.findByLabelText("Filtrar alertas por plantel"), { target: { value: "1" } });
+    // El plantel ya no tiene selector propio: llega del selector global.
+    expect(screen.queryByLabelText("Filtrar alertas por plantel")).not.toBeInTheDocument();
+    expect(api.maintenances).toHaveBeenCalledWith("1");
+    expect(api.list).toHaveBeenCalledWith("switches", { plantel: "1" });
     fireEvent.change(screen.getByLabelText("Filtrar alertas por tipo"), { target: { value: "snmp" } });
     await waitFor(() => expect(api.alerts).toHaveBeenLastCalledWith(false, { plantel: "1", tipo: "snmp", estado: "all" }));
     expect(api.alerts).toHaveBeenCalledWith(true, { plantel: "1", tipo: "snmp" });
     unmount();
     api.alerts.mockClear();
     render(<Alerts user={{ can_edit: false }} />);
-    await waitFor(() => expect(api.alerts).toHaveBeenCalledWith(true, { plantel: "1", tipo: "snmp" }));
+    await waitFor(() => expect(api.alerts).toHaveBeenCalledWith(true, { plantel: "", tipo: "snmp" }));
     expect(screen.getByLabelText("Filtrar alertas por tipo")).toHaveValue("snmp");
     fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
     await waitFor(() => expect(api.alerts).toHaveBeenLastCalledWith(false, { plantel: "", tipo: "all", estado: "all" }));

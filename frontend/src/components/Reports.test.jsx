@@ -43,24 +43,34 @@ describe("Reports", () => {
     expect(map.querySelectorAll("circle.external")).toHaveLength(1);
   });
 
-  it("marca APs y teléfonos: ícono en el mapa, teléfonos fuera del dibujo y columna Tipo", async () => {
+  it("dibuja APs y teléfonos como hojas del switch, con columna Tipo", async () => {
     api.report.mockImplementation((kind, query) => Promise.resolve(report(kind,
       [{ clave: "switch", titulo: "Switch" }, { clave: "tipo_equipo", titulo: "Tipo" }, { clave: "vecino", titulo: "Vecino" }], [
-        { switch: "SW-CORE", vecino: "AP-01", vecino_tipo: "ap", tipo_equipo: "Access point", en_inventario: "No" },
-        { switch: "SW-CORE", vecino: "SEP001122334455", vecino_tipo: "telefono", tipo_equipo: "Teléfono IP", en_inventario: "No" },
+        { switch: "SW-CORE", puerto: "Gi1/0/1", vecino: "AP-01", vecino_tipo: "ap", tipo_equipo: "Access point", en_inventario: "No" },
+        { switch: "SW-CORE", puerto: "Gi1/0/2", vecino: "SEP001122334455", vecino_tipo: "telefono", tipo_equipo: "Teléfono IP", en_inventario: "No" },
       ], `${kind} ${query}`)));
     render(<Reports />);
     fireEvent.click(screen.getByRole("button", { name: "Topología" }));
     const map = await screen.findByRole("img", { name: "Mapa de enlaces CDP" });
-    expect(map.querySelectorAll("circle")).toHaveLength(2);
-    expect(map.querySelector("[aria-label='Access point']")).toHaveTextContent("📶");
-    expect(screen.getByText(/1 teléfono IP conectado/)).toBeInTheDocument();
-    expect(screen.getByText("Access point").closest(".neighbor-type")).toHaveTextContent("📶 Access point");
-    expect(screen.getByText("Teléfono IP").closest(".neighbor-type")).toHaveTextContent("☎ Teléfono IP");
+    expect(map.querySelectorAll("circle")).toHaveLength(3);
+    expect(map.querySelector("[data-kind='ap']")).toHaveTextContent("📶");
+    expect(map.querySelector("[data-kind='telefono']")).toHaveTextContent("☎");
+    expect(document.querySelector(".neighbor-ap")).toHaveTextContent("📶 Access point");
+    expect(document.querySelector(".neighbor-telefono")).toHaveTextContent("☎ Teléfono IP");
     fireEvent.click(screen.getByRole("button", { name: "APs y teléfonos" }));
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo="));
     fireEvent.change(screen.getByLabelText("Equipo"), { target: { value: "ap" } });
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo=ap"));
+  });
+
+  it("pide cada reporte y su CSV con el plantel global", async () => {
+    api.report.mockImplementation((kind) => Promise.resolve(report(kind, [{ clave: "switch", titulo: "Switch" }], [{ switch: "SW-APAN" }])));
+    render(<Reports plantel="4" />);
+    expect(await screen.findByText("SW-APAN")).toBeInTheDocument();
+    expect(api.report).toHaveBeenLastCalledWith("inventario", "?plantel=4");
+    expect(screen.getByRole("link", { name: "Descargar CSV" })).toHaveAttribute("href", "/api/reportes/inventario/?plantel=4&formato=csv");
+    fireEvent.click(screen.getByRole("button", { name: "Puertos sin uso" }));
+    await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("puertos-sin-uso", "?dias=30&plantel=4"));
   });
 
   it("muestra tendencias de 7 o 30 días y avisa si InfluxDB no respondió", async () => {

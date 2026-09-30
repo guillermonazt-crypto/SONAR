@@ -14,10 +14,10 @@ const blank = {
   activo: true,
 };
 const value = (v) => (v === null || v === undefined ? "Sin lectura" : v);
-export default function Inventory({ user }) {
+export default function Inventory({ user, plantel = "" }) {
   const [devices, setDevices] = useState([]),
     [sites, setSites] = useState([]),
-    [form, setForm] = useState(blank),
+    [form, setForm] = useState(() => ({ ...blank, plantel })),
     [editing, setEditing] = useState(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -27,7 +27,7 @@ export default function Inventory({ user }) {
   async function refresh() {
     try {
       const [d, s] = await Promise.all([
-        api.list("switches"),
+        api.list("switches", { plantel }),
         api.list("planteles"),
       ]);
       setDevices(d);
@@ -54,7 +54,7 @@ export default function Inventory({ user }) {
         { ...form, plantel: Number(form.plantel) },
         editing,
       );
-      setForm(blank);
+      setForm({ ...blank, plantel });
       setEditing(null);
       await refresh();
     } catch (e) {
@@ -141,7 +141,7 @@ export default function Inventory({ user }) {
           onAdd={(item) => {
             // Prellena el formulario; el editor elige plantel y rol antes de guardar.
             setEditing(null);
-            setForm({ ...blank, nombre: (item.nombre || "").split(".")[0].slice(0, 100), hostname: item.ip });
+            setForm({ ...blank, plantel, nombre: (item.nombre || "").split(".")[0].slice(0, 100), hostname: item.ip });
             document.getElementById("inventory-form")?.scrollIntoView({ behavior: "smooth" });
           }}
         />
@@ -226,7 +226,7 @@ export default function Inventory({ user }) {
                   type="button"
                   onClick={() => {
                     setEditing(null);
-                    setForm(blank);
+                    setForm({ ...blank, plantel });
                   }}
                 >
                   Cancelar edición

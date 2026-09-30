@@ -60,14 +60,14 @@ function LevelBadge({ level }) {
 }
 
 /** Transceptores SFP: potencia RX/TX, temperatura y alertas fuera de rango. */
-export default function Optics({ onOpenPort = () => {} }) {
+export default function Optics({ plantel = "", onOpenPort = () => {} }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
 
   async function refresh(force = false) {
     try {
-      setData(await api.optics(force));
+      setData(await api.optics(force, plantel));
       setError("");
     } catch (exception) {
       setError(exception.message);

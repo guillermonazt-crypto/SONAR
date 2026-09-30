@@ -155,6 +155,42 @@ describe("SONAR", () => {
     expect(screen.getByText("192.0.2.20")).toBeInTheDocument();
     expect(screen.getByText("00:11:22:33:44:55")).toBeInTheDocument();
   });
+  it("filtra todas las pestañas por el plantel global y lo recuerda al recargar", async () => {
+    localStorage.removeItem("sonar-plantel");
+    api.session.mockResolvedValue({ user: { username: "reader", rol: "lector", can_edit: false } });
+    api.summary.mockResolvedValue({ generado: null, ultima_lectura: null, umbrales: {}, planteles: [], switches: [] });
+    api.optics.mockResolvedValue({ transceptores: [], umbrales: {} });
+    api.list.mockImplementation((resource) => Promise.resolve(resource === "planteles"
+      ? [{ id: 1, nombre: "Lab" }, { id: 2, nombre: "Apan" }]
+      : []));
+    const { unmount } = render(<App />);
+    const picker = await screen.findByLabelText("Filtrar todo por plantel");
+    await screen.findByRole("option", { name: "Apan" });
+    expect(picker).toHaveValue("");
+    expect(api.list).toHaveBeenCalledWith("switches", { plantel: "" });
+    fireEvent.change(picker, { target: { value: "2" } });
+    expect(localStorage.getItem("sonar-plantel")).toBe("2");
+    // Monitoreo se recarga con el plantel y el contador de alertas también.
+    await waitFor(() => expect(api.list).toHaveBeenCalledWith("switches", { plantel: "2" }));
+    await waitFor(() => expect(api.alertSummary).toHaveBeenLastCalledWith("2"));
+    fireEvent.click(screen.getByRole("button", { name: "Resumen" }));
+    await waitFor(() => expect(api.summary).toHaveBeenCalledWith(false, "2"));
+    fireEvent.click(screen.getByRole("button", { name: "Ópticas" }));
+    await waitFor(() => expect(api.optics).toHaveBeenCalledWith(false, "2"));
+    fireEvent.click(screen.getByRole("button", { name: "Inventario" }));
+    await waitFor(() => expect(api.list).toHaveBeenLastCalledWith("planteles"));
+    expect(api.list).toHaveBeenCalledWith("switches", { plantel: "2" });
+    unmount();
+    // Al recargar se restaura el plantel guardado.
+    api.alertSummary.mockClear();
+    render(<App />);
+    const restored = await screen.findByLabelText("Filtrar todo por plantel");
+    await screen.findByRole("option", { name: "Apan" });
+    expect(restored).toHaveValue("2");
+    await waitFor(() => expect(api.alertSummary).toHaveBeenCalledWith("2"));
+    fireEvent.change(restored, { target: { value: "" } });
+    expect(localStorage.getItem("sonar-plantel")).toBeNull();
+  });
   it("muestra error y permite reintentar conexión", async () => {
     api.session
       .mockRejectedValueOnce(new Error("offline"))

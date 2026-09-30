@@ -34,7 +34,7 @@ function SiteCounts({ devices }) {
   );
 }
 
-export default function Monitoring({ focus = null, onFocusHandled = () => {} }) {
+export default function Monitoring({ plantel = "", focus = null, onFocusHandled = () => {} }) {
   const [devices, setDevices] = useState([]);
   const [ports, setPorts] = useState(null);
   const [error, setError] = useState("");
@@ -49,7 +49,7 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
 
   async function refresh() {
     try {
-      setDevices(await api.list("switches"));
+      setDevices(await api.list("switches", { plantel }));
       setError("");
     } catch (exception) {
       setError(exception.message);
@@ -159,7 +159,7 @@ export default function Monitoring({ focus = null, onFocusHandled = () => {} }) 
       {loading ? (
         <p role="status">Cargando monitoreo…</p>
       ) : !folders.length ? (
-        <section className="card empty">No hay switches en el inventario.</section>
+        <section className="card empty">{plantel ? "No hay switches en este plantel." : "No hay switches en el inventario."}</section>
       ) : (
         <div className="monitor-folders">
           {folders.map(([site, siteDevices]) => (

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { api } from "../api/client";
 import { formatRate } from "../utils/format";
-import { neighborType } from "../utils/neighbor";
 import NeighborTypeLabel from "./NeighborType";
 import SonarDataTable from "./DataTable";
 import LineChart from "./LineChart";
+import TopologyMap from "./TopologyMap";
 import { useViewState } from "../utils/viewState";
 
 // [tipo, etiqueta, parámetro opcional {clave, etiqueta, valor, opciones}]
@@ -71,67 +71,8 @@ function TrendCharts({ serie }) {
   );
 }
 
-/** Mapa simple de enlaces CDP/LLDP: nodos en círculo y una línea por enlace.
- *  Los teléfonos no se dibujan (serían cientos de nodos); se cuentan aparte. */
-function TopologyMap({ rows: allRows }) {
-  const { nodes, links, phones } = useMemo(() => {
-    const rows = allRows.filter((row) => row.vecino_tipo !== "telefono");
-    const names = new Map();
-    const label = (row, side) => (side === "local" ? row.switch : row.vecino.split(".")[0]);
-    rows.forEach((row) => {
-      if (!names.has(row.switch)) names.set(row.switch, { name: row.switch, known: true, kind: "switch" });
-      const neighbor = label(row, "neighbor");
-      if (!names.has(neighbor)) names.set(neighbor, { name: neighbor, known: row.en_inventario === "Sí", kind: row.vecino_tipo });
-    });
-    const list = [...names.values()];
-    const radius = Math.max(120, list.length * 14);
-    const size = radius * 2 + 180;
-    list.forEach((node, index) => {
-      const angle = (2 * Math.PI * index) / list.length - Math.PI / 2;
-      node.x = size / 2 + radius * Math.cos(angle);
-      node.y = size / 2 + radius * Math.sin(angle);
-    });
-    const byName = new Map(list.map((node) => [node.name, node]));
-    const seen = new Set();
-    const edges = [];
-    rows.forEach((row) => {
-      const a = row.switch;
-      const b = label(row, "neighbor");
-      const key = [a, b].sort().join("|");
-      if (seen.has(key)) return;
-      seen.add(key);
-      edges.push({ from: byName.get(a), to: byName.get(b), key });
-    });
-    return { nodes: { list, size }, links: edges, phones: allRows.length - rows.length };
-  }, [allRows]);
-  if (!nodes.list.length && !phones) return null;
-  return (
-    <>
-    {nodes.list.length > 0 && <svg className="topology-map" viewBox={`0 0 ${nodes.size} ${nodes.size}`} role="img" aria-label="Mapa de enlaces CDP">
-      {links.map((link) => (
-        <line key={link.key} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className="topology-link" />
-      ))}
-      {nodes.list.map((node) => (
-        <g key={node.name} transform={`translate(${node.x} ${node.y})`}>
-          <circle r="9" className={node.known ? "topology-node" : "topology-node external"} />
-          {node.kind === "ap" && (
-            <text y="4" textAnchor="middle" className="topology-icon" aria-label="Access point">{neighborType("ap").icon}</text>
-          )}
-          <text y="-14" textAnchor="middle" className="topology-label">{node.name}</text>
-        </g>
-      ))}
-    </svg>}
-    {phones > 0 && (
-      <p className="report-count">
-        <NeighborTypeLabel kind="telefono" label={`${phones} teléfono${phones === 1 ? "" : "s"} IP conectado${phones === 1 ? "" : "s"}`} /> · no se dibujan en el mapa; ver «APs y teléfonos».
-      </p>
-    )}
-    </>
-  );
-}
-
 /** Reportes para operación y para la dirección: en pantalla, CSV o impresos. */
-export default function Reports({ onOpenPort = () => {} }) {
+export default function Reports({ plantel = "", onOpenPort = () => {} }) {
   // El reporte abierto y sus parámetros se recuerdan como el resto de la vista.
   const [kind, setKind] = useViewState("report", "inventario");
   const [params, setParams] = useViewState("report-params", {});
@@ -143,7 +84,9 @@ export default function Reports({ onOpenPort = () => {} }) {
   const current = REPORTS.find(([id]) => id === kind) || REPORTS[0];
   const param = current[2];
   const paramValue = param ? params[kind] ?? param.value : null;
-  const query = param ? `?${param.key}=${encodeURIComponent(paramValue)}` : "";
+  // El plantel global se suma a los parámetros del reporte (pantalla y CSV).
+  const own = param ? `?${param.key}=${encodeURIComponent(paramValue)}` : "";
+  const query = plantel ? `${own}${own ? "&" : "?"}plantel=${encodeURIComponent(plantel)}` : own;
 
   useEffect(() => {
     let active = true;
@@ -254,7 +197,7 @@ export default function Reports({ onOpenPort = () => {} }) {
           )
         ) : (
           <div className={loading ? "is-stale" : ""}>
-            {kind === "topologia" && <TopologyMap rows={data.filas} />}
+            {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} />}
             <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"} · generado {new Date().toLocaleString()}</p>

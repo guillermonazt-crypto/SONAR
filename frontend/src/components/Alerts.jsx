@@ -6,7 +6,7 @@ import { useViewState } from "../utils/viewState";
 import SonarDataTable from "./DataTable";
 import { REASON_TYPES } from "./Status";
 
-const NO_FILTERS = { plantel: "", tipo: "all", estado: "all" };
+const NO_FILTERS = { tipo: "all", estado: "all" };
 
 const blankWindow = { tipo: "switch", objetivo: "", inicio: "", fin: "", motivo: "" };
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
@@ -30,7 +30,7 @@ function Reasons({ items }) {
 }
 
 /** Centro de alertas: episodios en riesgo, reconocimiento y ventanas de mantenimiento. */
-export default function Alerts({ user, onOpenDevice = () => {} }) {
+export default function Alerts({ user, plantel = "", onOpenDevice = () => {} }) {
   const [open, setOpen] = useState(null);
   const [history, setHistory] = useState([]);
   const [windows, setWindows] = useState([]);
@@ -40,10 +40,11 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
   const [form, setForm] = useState(blankWindow);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  // Plantel y tipo aplican a abiertas e historial; el estado sólo al historial.
-  const [filters, setFilters] = useViewState("alerts-filters", NO_FILTERS);
-  const scope = { plantel: filters.plantel, tipo: filters.tipo };
-  const filtered = filters.plantel !== "" || filters.tipo !== "all" || filters.estado !== "all";
+  // El plantel viene del selector global; tipo aplica a abiertas e historial y el estado sólo al historial.
+  const [savedFilters, setFilters] = useViewState("alerts-filters", NO_FILTERS);
+  const filters = { tipo: savedFilters.tipo, estado: savedFilters.estado };
+  const scope = { plantel, tipo: filters.tipo };
+  const filtered = plantel !== "" || filters.tipo !== "all" || filters.estado !== "all";
 
   const latest = useRef(0);
 
@@ -54,7 +55,7 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
       const [active, all, current] = await Promise.all([
         api.alerts(true, scope),
         api.alerts(false, { ...scope, estado: filters.estado }),
-        api.maintenances(),
+        api.maintenances(plantel),
       ]);
       if (id !== latest.current) return;
       setOpen(active);
@@ -67,11 +68,11 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
   }
   useEffect(() => {
     refresh();
-  }, [filters.plantel, filters.tipo, filters.estado]);
+  }, [plantel, filters.tipo, filters.estado]);
   useEffect(() => {
     // Los planteles sirven al filtro (todos los roles); los switches sólo al formulario de mantenimiento.
     api.list("planteles").then(setSites).catch(() => {});
-    if (user.can_edit) api.list("switches").then(setSwitches).catch(() => {});
+    if (user.can_edit) api.list("switches", { plantel }).then(setSwitches).catch(() => {});
   }, []);
   useAutoRefresh(refresh, !busy);
 
@@ -146,13 +147,6 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
 
       <div className="filter-bar card alert-filters" role="group" aria-label="Filtrar alertas">
         <label className="inline-field">
-          Plantel
-          <select aria-label="Filtrar alertas por plantel" value={filters.plantel} onChange={(event) => setFilters({ ...filters, plantel: event.target.value })}>
-            <option value="">Todos</option>
-            {sites.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
-          </select>
-        </label>
-        <label className="inline-field">
           Tipo de alerta
           <select aria-label="Filtrar alertas por tipo" value={filters.tipo} onChange={(event) => setFilters({ ...filters, tipo: event.target.value })}>
             <option value="all">Cualquiera</option>
@@ -167,7 +161,7 @@ export default function Alerts({ user, onOpenDevice = () => {} }) {
             <option value="cerradas">Cerradas</option>
           </select>
         </label>
-        {filtered && <button type="button" className="chip" onClick={() => setFilters(NO_FILTERS)}>Limpiar filtros</button>}
+        {(filters.tipo !== "all" || filters.estado !== "all") && <button type="button" className="chip" onClick={() => setFilters(NO_FILTERS)}>Limpiar filtros</button>}
       </div>
 
       <section className="card">
