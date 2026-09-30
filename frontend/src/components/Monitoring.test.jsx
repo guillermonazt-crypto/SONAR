@@ -35,7 +35,7 @@ describe("Monitoring con refresco automático", () => {
     expect(await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/ })).toBeInTheDocument();
     const listCalls = api.list.mock.calls.length;
 
-    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await act(() => vi.advanceTimersByTimeAsync(10000));
 
     expect(api.list.mock.calls.length).toBeGreaterThan(listCalls);
     expect(api.ports).toHaveBeenCalledTimes(2);
@@ -70,7 +70,7 @@ describe("Monitoring con refresco automático", () => {
     render(<Monitoring />);
     fireEvent.click(await screen.findByRole("button", { name: "Ver puertos" }));
     await screen.findByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/});
-    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await act(() => vi.advanceTimersByTimeAsync(10000));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /GigabitEthernet1\/0\/1: Activo/})).toBeInTheDocument();
   });

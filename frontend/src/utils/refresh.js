@@ -5,8 +5,8 @@ const EVENT = "sonar-refresh-change";
 const ACTIVITY = "sonar-refresh-activity";
 
 /** Intervalos disponibles en segundos; 0 desactiva el refresco automático. */
-export const REFRESH_OPTIONS = [3, 5, 30, 0];
-export const DEFAULT_REFRESH = 3;
+export const REFRESH_OPTIONS = [3, 10, 30, 0];
+export const DEFAULT_REFRESH = 10;
 
 function storedInterval() {
   try {

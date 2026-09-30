@@ -30,26 +30,27 @@ afterEach(() => {
 });
 
 describe("refresco automático", () => {
-  it("usa 3 s por defecto y recuerda la elección", () => {
-    expect(currentRefreshInterval()).toBe(3);
+  it("usa 10 s por defecto y recuerda la elección", () => {
+    expect(currentRefreshInterval()).toBe(10);
     setRefreshInterval(30);
     expect(localStorage.getItem("sonar-refresh")).toBe("30");
     resetRefreshInterval();
     expect(currentRefreshInterval()).toBe(30);
     localStorage.setItem("sonar-refresh", "7");
     resetRefreshInterval();
-    expect(currentRefreshInterval()).toBe(3);
+    expect(currentRefreshInterval()).toBe(10);
   });
 
   it("consulta al ritmo elegido y se puede desactivar", async () => {
     const load = vi.fn().mockResolvedValue();
+    setRefreshInterval(3);
     render(<Probe load={load} />);
     await act(() => vi.advanceTimersByTimeAsync(9000));
     expect(load).toHaveBeenCalledTimes(3);
 
-    act(() => setRefreshInterval(5));
+    act(() => setRefreshInterval(10));
     load.mockClear();
-    await act(() => vi.advanceTimersByTimeAsync(10000));
+    await act(() => vi.advanceTimersByTimeAsync(20000));
     expect(load).toHaveBeenCalledTimes(2);
 
     act(() => setRefreshInterval(0));
@@ -65,7 +66,7 @@ describe("refresco automático", () => {
     await act(() => vi.advanceTimersByTimeAsync(12000));
     expect(load).toHaveBeenCalledTimes(1);
     await act(async () => finish());
-    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await act(() => vi.advanceTimersByTimeAsync(10000));
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -89,7 +90,7 @@ describe("refresco automático", () => {
   it("el selector del encabezado cambia el intervalo y muestra el estado", () => {
     render(<RefreshControl />);
     const select = screen.getByLabelText("Refresco automático");
-    expect(select).toHaveValue("3");
+    expect(select).toHaveValue("10");
     expect(screen.getByText("En vivo")).toBeInTheDocument();
     fireEvent.change(select, { target: { value: "0" } });
     expect(currentRefreshInterval()).toBe(0);
