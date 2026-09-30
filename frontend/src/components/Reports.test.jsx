@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import Reports, { NETWORK_REPORTS } from "./Reports";
 import { api } from "../api/client";
 
@@ -68,6 +68,11 @@ describe("Reports", () => {
     render(<Reports />);
     await waitFor(() => expect(api.report).toHaveBeenCalledWith("inventario", ""));
     expect(screen.queryByRole("button", { name: "Topología" })).not.toBeInTheDocument();
+    // Menú agrupado por tema en lugar de una fila de botones.
+    const menu = screen.getByRole("navigation", { name: "Reportes disponibles" });
+    expect(within(menu).getByText("Puertos")).toBeInTheDocument();
+    expect(within(menu).getByText("Energía y fibra")).toBeInTheDocument();
+    expect(within(menu).getByRole("button", { name: "Inventario" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: "PoE" })).toBeInTheDocument();
   });
 

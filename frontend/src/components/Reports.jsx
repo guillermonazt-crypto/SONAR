@@ -23,6 +23,13 @@ const REPORTS = [
   ["topologia", "Topología"],
   ["aps-telefonos", "APs y teléfonos", { key: "equipo", label: "Equipo", value: "", options: [["", "Todos"], ["ap", "Access points"], ["telefono", "Teléfonos"]] }],
 ];
+// Agrupación del menú de reportes (lo que no aparezca aquí va en "Otros").
+const GROUPS = [
+  ["Equipos", ["inventario", "disponibilidad", "hardware"]],
+  ["Puertos", ["puertos-sin-uso", "puertos-inestables", "puertos-saturados", "puertos-errores"]],
+  ["Energía y fibra", ["poe", "opticas"]],
+  ["Históricos", ["tendencias"]],
+];
 const LEVEL_TEXT = { ok: "Normal", warning: "Atención", critical: "En riesgo" };
 
 function cell(key, value) {
@@ -142,21 +149,36 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
     });
   }
 
+  const grouped = available.length > 1
+    ? [
+      ...GROUPS.map(([title, ids]) => [title, available.filter(([id]) => ids.includes(id))]),
+      ["Otros", available.filter(([id]) => !GROUPS.some(([, ids]) => ids.includes(id)))],
+    ].filter(([, items]) => items.length)
+    : [];
+
   return (
     <>
       {heading && (
         <div className="section-title page-heading no-print">
           <div>
             <h2>Reportes</h2>
-            <p>Consulta en pantalla, descarga en CSV (Excel) o imprime / guarda como PDF.</p>
+            <p>Consulta en pantalla, descarga en CSV o imprime como PDF.</p>
           </div>
         </div>
       )}
-      {available.length > 1 && <div className="filter-row report-picker no-print">
-        {available.map(([id, label]) => (
-          <button key={id} type="button" className={kind === id ? "active" : ""} onClick={() => setKind(id)}>{label}</button>
-        ))}
-      </div>}
+      <div className={grouped.length ? "reports-layout" : ""}>
+      {grouped.length > 0 && (
+        <nav className="report-nav no-print" aria-label="Reportes disponibles">
+          {grouped.map(([title, items]) => (
+            <div key={title} className="report-nav-group">
+              <span className="report-nav-title">{title}</span>
+              {items.map(([id, label]) => (
+                <button key={id} type="button" className={kind === id ? "active" : ""} aria-current={kind === id ? "true" : undefined} onClick={() => setKind(id)}>{label}</button>
+              ))}
+            </div>
+          ))}
+        </nav>
+      )}
       <section className="card report-card">
         <div className="section-title">
           <div>
@@ -184,8 +206,8 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
                 />
               </label>
             )}
-            <a className="button" href={`/api/reportes/${kind}/${query ? `${query}&` : "?"}formato=csv`}>Descargar CSV</a>
-            <button type="button" onClick={() => window.print()}>Imprimir / PDF</button>
+            <a className="button secondary" href={`/api/reportes/${kind}/${query ? `${query}&` : "?"}formato=csv`}>Descargar CSV</a>
+            <button type="button" className="secondary" onClick={() => window.print()}>Imprimir / PDF</button>
           </div>
         </div>
         {error && <p role="alert">{error}</p>}
@@ -206,7 +228,7 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
             {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} />}
-            <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"} · generado {new Date().toLocaleString()}</p>
+            <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"}</p>
             <div className="table-scroll sonar-table">
               <SonarDataTable
                 columns={columns}
@@ -219,6 +241,7 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
           </div>
         )}
       </section>
+      </div>
     </>
   );
 }

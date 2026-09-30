@@ -14,3 +14,25 @@ describe("ubicación de planteles", () => {
     expect(siteCoordinates({ nombre: "Plantel desconocido" })).toBeNull();
   });
 });
+
+import hidalgo from "./hidalgo.geo.json";
+
+const inside = ([lat, lng], ring) => {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+};
+
+describe("contorno de Hidalgo", () => {
+  it("contiene Pachuca, Huejutla, Zimapán y Apan", () => {
+    const ring = hidalgo.features.find((feature) => feature.properties.id === "hid").geometry.coordinates[0];
+    ["Escuela Preparatoria Número 1", "Escuela Superior Huejutla", "Escuela Superior Zimapán", "Escuela Superior Apan"].forEach((nombre) => {
+      expect(inside(siteCoordinates({ nombre }), ring)).toBe(true);
+    });
+    expect(inside([19.43, -99.13], ring)).toBe(false); // Ciudad de México
+  });
+});

@@ -198,6 +198,7 @@ export default function App() {
             ) : view === "status" ? (
               <StatusView
                 plantel={plantel}
+                siteName={siteName}
                 segment={statusSegment}
                 onSegment={(segment) => { setStatusSegment(segment); setSelection({ device: null, port: null }); }}
                 onPlantelChange={setPlantel}
@@ -210,7 +211,7 @@ export default function App() {
             ) : view === "alerts" ? (
               <Alerts key={plantel} plantel={plantel} user={user} onOpenDevice={(device) => openDevice(device)} />
             ) : view === "network" ? (
-              <NetworkView plantel={plantel} onOpenPort={openDevice} />
+              <NetworkView plantel={plantel} siteName={siteName} sites={sites} onPlantelChange={setPlantel} onOpenPort={openDevice} />
             ) : view === "reports" ? (
               <Reports key={plantel} plantel={plantel} onOpenPort={openDevice} />
             ) : (

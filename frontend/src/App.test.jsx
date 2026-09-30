@@ -5,6 +5,7 @@ import {
   fireEvent,
   waitFor,
   cleanup,
+  within,
 } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
@@ -217,11 +218,33 @@ describe("SONAR", () => {
     api.summary.mockResolvedValue({ generado: null, ultima_lectura: null, umbrales: {}, planteles: [site], switches: [] });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Escuela Superior Apan: Crítico" }));
-    expect(await screen.findByRole("heading", { name: "Estado" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Escuela Superior Apan" })).toBeInTheDocument();
     expect(localStorage.getItem("sonar-plantel")).toBe("9");
     await waitFor(() => expect(api.summary).toHaveBeenCalledWith(false, "9"));
     expect(screen.getByRole("navigation", { name: "Ubicación" })).toHaveTextContent("Escuela Superior Apan");
     expect(screen.getByRole("button", { name: "Planteles" })).toHaveAttribute("aria-pressed", "true");
+    // Botón para regresar a elegir entre todos los planteles.
+    fireEvent.click(screen.getByRole("button", { name: "‹ Todos los planteles" }));
+    expect(await screen.findByRole("heading", { name: "Estado" })).toBeInTheDocument();
+    expect(localStorage.getItem("sonar-plantel")).toBeNull();
+    await waitFor(() => expect(api.summary).toHaveBeenLastCalledWith(false, ""));
+  });
+  it("Red pide elegir un plantel por división y muestra su topología", async () => {
+    api.session.mockResolvedValue({ user: { username: "reader", rol: "lector", can_edit: false } });
+    api.list.mockImplementation((resource) => Promise.resolve(resource === "planteles" ? [
+      { id: 3, nombre: "Instituto de Ciencias Básicas e Ingeniería", division_nombre: "Institutos" },
+      { id: 9, nombre: "Escuela Superior Apan", division_nombre: "Escuelas Superiores" },
+    ] : []));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Red" }));
+    const institutes = await screen.findByRole("region", { name: "Institutos" });
+    expect(screen.getByRole("region", { name: "Escuelas Superiores" })).toHaveTextContent("Escuela Superior Apan");
+    expect(api.report).not.toHaveBeenCalled();
+    fireEvent.click(within(institutes).getByRole("button", { name: /Instituto de Ciencias Básicas/ }));
+    expect(await screen.findByRole("heading", { name: "Instituto de Ciencias Básicas e Ingeniería" })).toBeInTheDocument();
+    await waitFor(() => expect(api.report).toHaveBeenCalledWith("topologia", "?plantel=3"));
+    fireEvent.click(screen.getByRole("button", { name: "‹ Todos los planteles" }));
+    expect(await screen.findByRole("region", { name: "Institutos" })).toBeInTheDocument();
   });
   it("recuerda el menú lateral contraído y lleva las pestañas antiguas a su sección nueva", async () => {
     api.session.mockResolvedValue({ user: { username: "reader", rol: "lector", can_edit: false } });

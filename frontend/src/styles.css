@@ -54,25 +54,25 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f5f5f7;
-  --surface: #ffffff;
-  --surface-2: #fbfbfd;
-  --surface-3: #f2f2f7;
-  --border: #e5e5ea;
-  --border-strong: #d2d2d7;
+  --bg: #e7ebf0;
+  --surface: #f7f9fb;
+  --surface-2: #f2f5f8;
+  --surface-3: #e4e9ef;
+  --border: #d8dee6;
+  --border-strong: #c7cfd9;
   --border-heavy: #aeaeb2;
-  --text: #1d1d1f;
-  --text-2: #3a3a3c;
-  --muted: #6e6e73;
-  --muted-2: #86868b;
+  --text: #1f2733;
+  --text-2: #394453;
+  --muted: #5d6877;
+  --muted-2: #748091;
   --faint: #aeaeb2;
-  --accent: #0071e3;
-  --accent-hover: #0077ed;
+  --accent: #2f6fd6;
+  --accent-hover: #2563c7;
   --on-accent: #ffffff;
-  --accent-soft: #0071e314;
-  --accent-line: #0071e366;
-  --accent-ring: #0071e333;
-  --selection: #0071e32e;
+  --accent-soft: #2f6fd61a;
+  --accent-line: #2f6fd666;
+  --accent-ring: #2f6fd633;
+  --selection: #2f6fd62e;
   --violet: #8944ab;
   --ok: #248a3d;
   --warning: #b25000;
@@ -83,18 +83,18 @@
   --led-voice: #007aff;
   --led-damaged: #b8d400;
   --damaged-text: #6f7f00;
-  --row-hover: #0000000a;
+  --row-hover: #1f27330d;
   --backdrop: #0000004d;
   --shadow: #0000001a;
   --shadow-strong: #0000002e;
-  --face-top: #ffffff;
-  --face-bottom: #ececf0;
-  --face-inset: #ffffff;
-  --grid-line: #ececf0;
+  --face-top: #f7f9fb;
+  --face-bottom: #e1e6ec;
+  --face-inset: #f7f9fb;
+  --grid-line: #dfe4ea;
   --topo-ap: #248a3d;
-  --topo-phone: #0071e3;
+  --topo-phone: #2f6fd6;
   --topo-switch: #86868b;
-  --glass: #ffffffcc;
+  --glass: #eef2f6d9;
   --signal-ok: #34c759;
   --signal-warning: #ffcc00;
   --signal-critical: #ff3b30;
@@ -1105,7 +1105,7 @@ footer {
   border-radius: 6px;
   padding: 10px 14px;
 }
-.stat-time { font-size: 20px !important; }
+.stat-time { font-size: 17px !important; line-height: 1.3; }
 .site-group + .site-group { margin-top: 26px; }
 .site-heading {
   display: flex;
@@ -1126,6 +1126,7 @@ footer {
 /* react-data-table-component v8 pinta el hover con sus propias variables
    (--rdt-color-highlight, #eee por defecto y con !important): sin mapearlas,
    la fila quedaba en blanco con el texto claro encima. Se enlazan al tema. */
+:root,
 .rdt_table {
   --rdt-color-bg: var(--surface-2);
   --rdt-color-header-bg: var(--surface-3);
@@ -1144,7 +1145,12 @@ footer {
   --rdt-color-primary: var(--accent);
   --rdt-color-scheme: dark;
 }
+:root[data-theme="light"],
 :root[data-theme="light"] .rdt_table { --rdt-color-scheme: light; }
+/* La paginación (react-data-table v8) queda fuera de .rdt_table: variables en :root arriba. */
+.rdt_pagination { background: var(--surface-3); color: var(--muted); }
+.rdt_pagination select,
+.rdt_selectWrapper select { background-color: var(--surface-3); color: var(--text); border-color: transparent; }
 .rdt_rowHighlight:hover { box-shadow: inset 3px 0 0 var(--accent); }
 /* Selector "Rows per page" de la tabla: la regla global de select lo aplastaba. */
 .rdt_Pagination select {
@@ -1488,7 +1494,7 @@ button:active:not(:disabled) { transform: scale(0.98); background: var(--surface
 :root[data-theme="light"] .card,
 :root[data-theme="light"] .panel {
   border-color: transparent;
-  box-shadow: 0 1px 2px #0000000a, 0 4px 16px #0000000a;
+  box-shadow: 0 1px 2px #1f27330d, 0 6px 18px #1f27330a;
 }
 .card + .card, .panel + .card, .card + .panel { margin-top: 20px; }
 .stats article {
@@ -1678,7 +1684,7 @@ button:active:not(:disabled) { transform: scale(0.98); background: var(--surface
   background: var(--surface);
   border: 1px solid var(--border);
 }
-:root[data-theme="light"] .noc-kpi { border-color: transparent; box-shadow: 0 1px 2px #0000000a, 0 4px 16px #0000000a; }
+:root[data-theme="light"] .noc-kpi { border-color: transparent; box-shadow: 0 1px 2px #1f27330d, 0 6px 18px #1f27330a; }
 .noc-kpi > span { display: block; color: var(--muted); font-size: 13px; font-weight: 500; }
 .noc-kpi strong { display: block; margin-top: 6px; font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; }
 .noc-kpi small { margin-top: 4px; font-size: 12px; }
@@ -1823,7 +1829,7 @@ main.content { max-width: none; width: 100%; margin: 0; }
 .overview-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
 .overview-stats article { padding: 18px 20px; }
 .overview-stats strong { font-size: 30px; }
-:root[data-theme="light"] .stats article { border-color: transparent; box-shadow: 0 1px 2px #0000000a, 0 4px 16px #0000000a; }
+:root[data-theme="light"] .stats article { border-color: transparent; box-shadow: 0 1px 2px #1f27330d, 0 6px 18px #1f27330a; }
 .metric-warning { color: var(--warning); }
 .site-tile-kpis small { text-transform: none; letter-spacing: normal; font-size: 11px; }
 .site-tile { border-left-width: 3px; }
@@ -1842,3 +1848,94 @@ main.content { max-width: none; width: 100%; margin: 0; }
   .app-shell .topbar { gap: 8px; }
   .app-shell .topbar-tools { flex-wrap: nowrap; }
 }
+.leaflet-tooltip.noc-state-label {
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0;
+}
+.leaflet-tooltip.noc-state-label::before { display: none; }
+/* Opciones de los selectores (incluido "Rows per page" de las tablas): la tabla
+   les ponía fondo blanco y en modo oscuro el texto también blanco. */
+select option,
+.rdt_Pagination select option {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+}
+.rdt_Pagination select { background-color: var(--surface-3); border-color: transparent; border-radius: 8px; }
+
+/* Reportes: menú agrupado a la izquierda y el reporte a la derecha. */
+.reports-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+.report-nav { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 18px; }
+.report-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.report-nav-title { padding: 0 12px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.report-nav button {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  font-weight: 400;
+}
+.report-nav button:hover { background: var(--row-hover); }
+.report-nav button.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.report-card .section-title { align-items: flex-start; gap: 16px; }
+.report-card .section-title h2 { font-size: 20px; }
+.report-card .section-title small { max-width: 60ch; }
+.report-actions { gap: 8px; }
+.report-actions .inline-field { margin: 0; }
+.report-actions .secondary, a.button.secondary { background: transparent; color: var(--accent); padding: 7px 10px; }
+.report-actions .secondary:hover { background: var(--accent-soft); color: var(--accent); }
+.report-count { margin: 4px 0 10px; font-size: 12px; }
+@media (max-width: 1000px) {
+  .reports-layout { grid-template-columns: minmax(0, 1fr); }
+  .report-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 10px; }
+  .report-nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .report-nav-title { padding: 0 6px 0 0; }
+  .report-nav button { width: auto; }
+}
+
+/* Volver a todos los planteles y selector de plantel por división. */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px -8px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 500;
+}
+.back-button:hover { background: var(--accent-soft); color: var(--accent); }
+.site-picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.site-picker-hint { grid-column: 1 / -1; margin: 0; }
+.site-picker-group { padding: 18px 10px 10px; }
+.site-picker-group .panel-title { display: flex; align-items: baseline; justify-content: space-between; padding: 0 10px; }
+.site-picker-group .panel-title small { margin: 0; font-weight: 500; }
+.site-picker-group ul { list-style: none; margin: 0; padding: 0; }
+.site-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+}
+.site-picker-item:hover { background: var(--row-hover); }
+.site-picker-item .chevron { color: var(--faint); font-size: 18px; line-height: 1; }
+@media (max-width: 1100px) { .site-picker-grid { grid-template-columns: minmax(0, 1fr); } }
+.report-nav { padding: 0; align-items: stretch; }
+.report-nav button { text-transform: none; letter-spacing: normal; font-size: 14px; }
+.overview-stats .stat-time { font-size: 17px; line-height: 1.3; }
