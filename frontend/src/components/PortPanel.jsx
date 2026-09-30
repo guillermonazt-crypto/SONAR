@@ -168,13 +168,14 @@ function PortPanelSkeleton() {
   );
 }
 
-export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose }) {
+export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose, onPortChange = () => {} }) {
   const [selected, setSelected] = useState(null);
   const restoredPort = useRef(false);
   async function openPort(port) {
     restoredPort.current = true;
     saveView("port", port.id);
     setSelected(port);
+    onPortChange(port);
     setHistoryLoading(port.id);
     try {
       const result = await api.portHistory(port.id);
@@ -188,6 +189,7 @@ export default function PortPanel({ device, items, loading, refreshing = false, 
   function closePort() {
     saveView("port", null);
     setSelected(null);
+    onPortChange(null);
   }
   // Tras recargar la página se vuelve a abrir el puerto que se estaba viendo.
   useEffect(() => {

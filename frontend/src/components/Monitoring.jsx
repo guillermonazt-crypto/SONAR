@@ -34,7 +34,7 @@ function SiteCounts({ devices }) {
   );
 }
 
-export default function Monitoring({ plantel = "", focus = null, onFocusHandled = () => {} }) {
+export default function Monitoring({ plantel = "", focus = null, onFocusHandled = () => {}, onSelect = () => {}, onPortChange = () => {} }) {
   const [devices, setDevices] = useState([]);
   const [ports, setPorts] = useState(null);
   const [error, setError] = useState("");
@@ -77,6 +77,7 @@ export default function Monitoring({ plantel = "", focus = null, onFocusHandled 
     restored.current = true;
     if (loadView("switch") !== device.id) saveView("port", null);
     saveView("switch", device.id);
+    onSelect(device);
     // Si ya se abrió antes, se muestran sus últimos puertos mientras llega la lectura nueva:
     // el panel nunca queda vacío esperando a la red.
     const cached = portsCache.current.get(device.id);
@@ -98,6 +99,8 @@ export default function Monitoring({ plantel = "", focus = null, onFocusHandled 
     saveView("switch", null);
     saveView("port", null);
     setPorts(null);
+    onSelect(null);
+    onPortChange(null);
   }
 
   // Tras recargar la página se vuelve a abrir el switch que se estaba viendo.
@@ -149,8 +152,7 @@ export default function Monitoring({ plantel = "", focus = null, onFocusHandled 
     <>
       <div className="section-title page-heading">
         <div>
-          <span className="eyebrow">OPERACIÓN</span>
-          <h2>Monitoreo por plantel</h2>
+          <h2>Switches y puertos</h2>
           <p>Abre una carpeta para consultar los switches que pertenecen a cada lugar.</p>
         </div>
         <button type="button" onClick={refresh}>Actualizar</button>
@@ -205,7 +207,7 @@ export default function Monitoring({ plantel = "", focus = null, onFocusHandled 
           ))}
         </div>
       )}
-      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} refreshing={ports.refreshing} failed={ports.failed} onRetry={() => showPorts(ports.device)} onClose={closePorts} />}
+      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} refreshing={ports.refreshing} failed={ports.failed} onRetry={() => showPorts(ports.device)} onClose={closePorts} onPortChange={onPortChange} />}
     </>
   );
 }

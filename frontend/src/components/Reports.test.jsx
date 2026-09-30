@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
-import Reports from "./Reports";
+import Reports, { NETWORK_REPORTS } from "./Reports";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({ api: { report: vi.fn() } }));
@@ -36,7 +36,7 @@ describe("Reports", () => {
       { switch: "SW-ACC", vecino: "SW-CORE", en_inventario: "Sí" },
       { switch: "SW-CORE", vecino: "AP-01", en_inventario: "No" },
     ]));
-    render(<Reports />);
+    render(<Reports kinds={NETWORK_REPORTS} />);
     fireEvent.click(screen.getByRole("button", { name: "Topología" }));
     const map = await screen.findByRole("img", { name: "Mapa de enlaces CDP" });
     expect(map.querySelectorAll("line")).toHaveLength(2);
@@ -49,7 +49,7 @@ describe("Reports", () => {
         { switch: "SW-CORE", puerto: "Gi1/0/1", vecino: "AP-01", vecino_tipo: "ap", tipo_equipo: "Access point", en_inventario: "No" },
         { switch: "SW-CORE", puerto: "Gi1/0/2", vecino: "SEP001122334455", vecino_tipo: "telefono", tipo_equipo: "Teléfono IP", en_inventario: "No" },
       ], `${kind} ${query}`)));
-    render(<Reports />);
+    render(<Reports kinds={NETWORK_REPORTS} />);
     fireEvent.click(screen.getByRole("button", { name: "Topología" }));
     const map = await screen.findByRole("img", { name: "Mapa de enlaces CDP" });
     expect(map.querySelectorAll("circle")).toHaveLength(3);
@@ -61,6 +61,14 @@ describe("Reports", () => {
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo="));
     fireEvent.change(screen.getByLabelText("Equipo"), { target: { value: "ap" } });
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo=ap"));
+  });
+
+  it("la sección Reportes no repite los reportes de Red", async () => {
+    api.report.mockImplementation((kind) => Promise.resolve(report(kind, [{ clave: "switch", titulo: "Switch" }], [])));
+    render(<Reports />);
+    await waitFor(() => expect(api.report).toHaveBeenCalledWith("inventario", ""));
+    expect(screen.queryByRole("button", { name: "Topología" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PoE" })).toBeInTheDocument();
   });
 
   it("pide cada reporte y su CSV con el plantel global", async () => {

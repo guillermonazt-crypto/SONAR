@@ -72,16 +72,21 @@ function TrendCharts({ serie }) {
 }
 
 /** Reportes para operación y para la dirección: en pantalla, CSV o impresos. */
-export default function Reports({ plantel = "", onOpenPort = () => {} }) {
+// Reportes que viven en la sección Red (topología y equipos conectados).
+export const NETWORK_REPORTS = ["topologia", "aps-telefonos"];
+
+export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = null, viewKey = "report", heading = true }) {
+  const available = kinds ? REPORTS.filter(([id]) => kinds.includes(id)) : REPORTS.filter(([id]) => !NETWORK_REPORTS.includes(id));
   // El reporte abierto y sus parámetros se recuerdan como el resto de la vista.
-  const [kind, setKind] = useViewState("report", "inventario");
+  const [savedKind, setKind] = useViewState(viewKey, available[0][0]);
+  const kind = available.some(([id]) => id === savedKind) ? savedKind : available[0][0];
   const [params, setParams] = useViewState("report-params", {});
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // Al imprimir se muestran todas las filas, no sólo la página visible de la tabla.
   const [printing, setPrinting] = useState(false);
-  const current = REPORTS.find(([id]) => id === kind) || REPORTS[0];
+  const current = available.find(([id]) => id === kind) || available[0];
   const param = current[2];
   const paramValue = param ? params[kind] ?? param.value : null;
   // El plantel global se suma a los parámetros del reporte (pantalla y CSV).
@@ -139,18 +144,19 @@ export default function Reports({ plantel = "", onOpenPort = () => {} }) {
 
   return (
     <>
-      <div className="section-title page-heading no-print">
-        <div>
-          <span className="eyebrow">INFORMES</span>
-          <h2>Reportes</h2>
-          <p>Consulta en pantalla, descarga en CSV (Excel) o imprime / guarda como PDF.</p>
+      {heading && (
+        <div className="section-title page-heading no-print">
+          <div>
+            <h2>Reportes</h2>
+            <p>Consulta en pantalla, descarga en CSV (Excel) o imprime / guarda como PDF.</p>
+          </div>
         </div>
-      </div>
-      <div className="filter-row report-picker no-print">
-        {REPORTS.map(([id, label]) => (
+      )}
+      {available.length > 1 && <div className="filter-row report-picker no-print">
+        {available.map(([id, label]) => (
           <button key={id} type="button" className={kind === id ? "active" : ""} onClick={() => setKind(id)}>{label}</button>
         ))}
-      </div>
+      </div>}
       <section className="card report-card">
         <div className="section-title">
           <div>
