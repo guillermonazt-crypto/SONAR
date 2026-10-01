@@ -220,8 +220,6 @@ describe("SONAR", () => {
       niveles: { ok: 1, warning: 0, critical: 1 }, puertos: { total: 48, up: 30, con_errores: 0 }, alertas_abiertas: 1, alertas_sin_reconocer: 1, disponibilidad: 50 };
     api.summary.mockResolvedValue({ generado: null, ultima_lectura: null, umbrales: {}, planteles: [site], switches: [] });
     render(<App />);
-    // El NOC arranca en la disponibilidad global; un clic abre los planteles.
-    fireEvent.click(await screen.findByRole("button", { name: /Disponibilidad global .*Ver detalle/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Escuela Superior Apan: Crítico" }));
     expect(await screen.findByRole("heading", { name: "Escuela Superior Apan" })).toBeInTheDocument();
     expect(localStorage.getItem("sonar-plantel")).toBe("9");

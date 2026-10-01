@@ -14,14 +14,11 @@ const site = (id, nombre, estado, extra = {}) => ({
   niveles: { ok: 2, warning: 0, critical: 0 }, puertos: { total: 48, up: 30 },
   alertas_abiertas: 0, alertas_sin_reconocer: 0, disponibilidad: 100, ...extra,
 });
-// El NOC arranca en la disponibilidad global; el detalle se abre con un clic.
-const openDetail = async () => fireEvent.click(await screen.findByRole("button", { name: /Disponibilidad global .*Ver detalle/ }));
 const summary = (planteles, switches = []) => ({ generado: null, ultima_lectura: new Date().toISOString(), umbrales: {}, planteles, switches });
 
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
-  sessionStorage.clear();
   resetRefreshInterval();
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
@@ -38,10 +35,6 @@ describe("Panel NOC", () => {
     ));
     render(<Noc refreshSeconds={10} />);
     expect(await screen.findByText("75%")).toBeInTheDocument();
-    expect(screen.getByText("3/4 switches responden · 1 plantel en rojo · 2 alertas sin reconocer")).toBeInTheDocument();
-    // Sin paginación ni tablas al arrancar: una sola métrica.
-    expect(screen.queryByRole("button", { name: /: (Crítico|Atención|Sano)$/ })).toBeNull();
-    await openDetail();
     expect(screen.getByText("3/4")).toBeInTheDocument();
     expect(screen.getByText("1 sin respuesta")).toBeInTheDocument();
     expect(screen.getByText("2 sin reconocer")).toBeInTheDocument();
@@ -59,7 +52,6 @@ describe("Panel NOC", () => {
       .mockResolvedValue(summary([site(9, "Escuela Superior Apan", "critical"), site(8, "Escuela Superior Actopan", "critical")]));
     const onOpenSite = vi.fn();
     render(<Noc refreshSeconds={10} onOpenSite={onOpenSite} />);
-    await openDetail();
     await screen.findByText("Escuela Superior Actopan");
     expect(playAlarm).not.toHaveBeenCalled();
     await act(() => vi.advanceTimersByTimeAsync(10000));
@@ -82,7 +74,6 @@ describe("Panel NOC", () => {
       .mockResolvedValue(summary([site(9, "Escuela Superior Apan", "critical")]));
     const onSound = vi.fn();
     render(<Noc refreshSeconds={10} sound={false} onSound={onSound} />);
-    await openDetail();
     await screen.findByText("Escuela Superior Apan");
     await act(() => vi.advanceTimersByTimeAsync(10000));
     await waitFor(() => expect(document.querySelector(".noc-incident")).not.toBeNull());
@@ -102,21 +93,6 @@ describe("Panel NOC", () => {
     rerender(<Noc refreshSeconds={30} />);
     expect(screen.getByRole("button", { name: "30 s" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(api.summary).toHaveBeenCalled());
-  });
-
-  it("profundiza por clic y el botón atrás vuelve a la métrica global", async () => {
-    api.summary.mockResolvedValue(summary([site(9, "Escuela Superior Apan", "ok")], [{ id: 1, activo: true, lectura_correcta: true }]));
-    const { unmount } = render(<Noc refreshSeconds={10} />);
-    expect(await screen.findByText("100%")).toBeInTheDocument();
-    await openDetail();
-    expect(screen.getByRole("button", { name: "Escuela Superior Apan: Sano" })).toBeInTheDocument();
-    // Al volver de un plantel el detalle sigue abierto.
-    unmount();
-    render(<Noc refreshSeconds={10} />);
-    expect(await screen.findByRole("button", { name: "Escuela Superior Apan: Sano" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "← Disponibilidad global" }));
-    expect(screen.queryByRole("button", { name: "Escuela Superior Apan: Sano" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Disponibilidad global 100%/ })).toBeInTheDocument();
   });
 
   it("detecta sólo las transiciones a crítico", () => {
