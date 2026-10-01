@@ -171,4 +171,26 @@ describe("Reports", () => {
     expect(document.querySelector(".report-bar[title^='Actopan:'] .fill-critical")).toBeInTheDocument();
     expect(document.querySelector(".report-bar[title^='Pachuca:'] .fill-ok")).toBeInTheDocument();
   });
+
+  it("grafica el uso de puertos y del presupuesto PoE con colores por nivel", async () => {
+    api.report.mockImplementation((kind) => Promise.resolve(kind === "puertos-saturados"
+      ? report(kind, [{ clave: "switch", titulo: "Switch" }], [
+        { switch: "SW-A", puerto: "Gi1/0/1", uso_pct: 95, troncal: "Sí" },
+        { switch: "SW-A", puerto: "Gi1/0/2", uso_pct: 72, troncal: "No" },
+      ])
+      : kind === "poe"
+        ? report(kind, [{ clave: "switch", titulo: "Switch" }], [
+          { switch: "SW-POE", presupuesto_w: 370, consumo_w: 100, uso_pct: 27, puertos_falla: 0, preparacion: "Listo" },
+        ])
+        : report(kind, [], [])));
+    render(<Reports />);
+    fireEvent.click(screen.getByRole("button", { name: "Puertos saturados" }));
+    expect(await screen.findByText("Uso por puerto")).toBeInTheDocument();
+    expect(document.querySelector(".report-bar[title^='SW-A · Gi1/0/1'] .fill-critical")).toBeInTheDocument();
+    expect(document.querySelector(".report-bar[title^='SW-A · Gi1/0/2'] .fill-warning")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "PoE" }));
+    expect(await screen.findByText("Uso del presupuesto PoE por switch")).toBeInTheDocument();
+    expect(screen.getByText("100 W")).toBeInTheDocument();
+    expect(document.querySelector(".report-bar[title^='SW-POE'] .fill-ok")).toBeInTheDocument();
+  });
 });

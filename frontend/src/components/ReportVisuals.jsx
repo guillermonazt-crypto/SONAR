@@ -372,3 +372,204 @@ export function DeviceCards({ rows, onOpenPort, printing = false }) {
     </div>
   );
 }
+
+const TOP = 10;
+const portLabel = (row) => `${row.switch} · ${row.puerto}`;
+const total = (rows, key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+
+/** Los `TOP` renglones con mayor valor como barras, escaladas contra el máximo (o `max`). */
+function TopBars({ title, rows, label, value, level, format = (v) => String(v), max, note }) {
+  const ranked = rows
+    .filter((row) => Number.isFinite(value(row)))
+    .sort((a, b) => value(b) - value(a))
+    .slice(0, TOP);
+  if (!ranked.length) return null;
+  const top = max ?? Math.max(...ranked.map(value), 1);
+  return (
+    <figure className="report-figure">
+      <figcaption>{title}</figcaption>
+      <BarList
+        rows={ranked.map((row) => ({ label: label(row), value: value(row), level: level?.(row) || "info" }))}
+        min={0}
+        max={top}
+        format={format}
+        scaleNote={note || (rows.length > TOP ? `Los ${TOP} más altos de ${rows.length}` : null)}
+      />
+    </figure>
+  );
+}
+
+/** Cuenta renglones por una clave: [{name, amount}]. */
+function countBy(rows, key) {
+  const counts = new Map();
+  rows.forEach((row) => counts.set(row[key] || "Sin dato", (counts.get(row[key] || "Sin dato") || 0) + 1));
+  return [...counts.entries()].map(([name, amount]) => ({ name, amount }));
+}
+
+function UnusedPorts({ rows }) {
+  const never = rows.filter((row) => !Number.isFinite(row.dias)).length;
+  const old = rows.filter((row) => row.dias >= 90).length;
+  return (
+    <div className="report-summary vertical">
+      <KpiTiles items={[
+        ["Puertos sin uso", rows.length, null, "Candidatos a reasignar"],
+        ["Más de 90 días", old, old ? "warning" : null],
+        ["Sin registro", never, never ? "info" : null, "Nunca vistos activos"],
+        ["Switches", new Set(rows.map((row) => row.switch)).size],
+      ]} />
+      <TopBars title="Puertos libres por switch" rows={countBy(rows, "switch")} label={(row) => row.name} value={(row) => row.amount} />
+    </div>
+  );
+}
+
+function FlappingPorts({ rows }) {
+  const down = rows.filter((row) => row.estado === "down").length;
+  return (
+    <div className="report-summary vertical">
+      <KpiTiles items={[
+        ["Puertos inestables", rows.length, "warning"],
+        ["Cambios up/down", total(rows, "cambios")],
+        ["Caídos ahora", down, down ? "critical" : null, "Último estado sin enlace"],
+      ]} />
+      <TopBars
+        title="Cambios de estado por puerto"
+        rows={rows}
+        label={portLabel}
+        value={(row) => row.cambios}
+        level={(row) => (row.estado === "down" ? "critical" : "warning")}
+      />
+      <MarkLegend levels={["critical", "warning"]} labels={{ critical: "Caído ahora", warning: "Con enlace" }} />
+    </div>
+  );
+}
+
+const usageLevel = (value) => (value >= 90 ? "critical" : value >= 70 ? "warning" : "ok");
+const percentText = (value) => `${Math.round(value)} %`;
+
+function SaturatedPorts({ rows }) {
+  const critical = rows.filter((row) => row.uso_pct >= 90).length;
+  return (
+    <div className="report-summary vertical">
+      <KpiTiles items={[
+        ["Puertos con uso alto", rows.length, "warning", "70 % o más"],
+        ["Saturados", critical, critical ? "critical" : null, "90 % o más"],
+        ["Troncales", rows.filter((row) => row.troncal === "Sí").length],
+      ]} />
+      <TopBars
+        title="Uso por puerto"
+        rows={rows}
+        label={portLabel}
+        value={(row) => row.uso_pct}
+        level={(row) => usageLevel(row.uso_pct)}
+        format={percentText}
+        max={100}
+      />
+      <MarkLegend levels={["warning", "critical"]} labels={{ warning: "70 % a 89 %", critical: "90 % o más" }} />
+    </div>
+  );
+}
+
+function ErrorPorts({ rows }) {
+  const errors = (row) => (Number(row.entrada) || 0) + (Number(row.salida) || 0);
+  const fresh = rows.filter((row) => row.nuevos > 0).length;
+  const crc = total(rows, "crc");
+  return (
+    <div className="report-summary vertical">
+      <KpiTiles items={[
+        ["Puertos con errores", rows.length, "warning"],
+        ["Errores CRC", crc.toLocaleString("es-MX"), crc ? "critical" : null, "Suelen indicar cable o conector"],
+        ["Errores de entrada", total(rows, "entrada").toLocaleString("es-MX")],
+        ["Con errores nuevos", fresh, fresh ? "critical" : null, "En el último ciclo del worker"],
+      ]} />
+      <TopBars
+        title="Errores acumulados por puerto"
+        rows={rows}
+        label={portLabel}
+        value={errors}
+        level={(row) => (row.nuevos > 0 ? "critical" : "warning")}
+        format={(value) => value.toLocaleString("es-MX")}
+      />
+      <MarkLegend levels={["critical", "warning"]} labels={{ critical: "Con errores nuevos", warning: "Errores anteriores" }} />
+    </div>
+  );
+}
+
+function PoeSummary({ rows }) {
+  const budget = total(rows, "presupuesto_w");
+  const used = total(rows, "consumo_w");
+  const faults = total(rows, "puertos_falla");
+  const ready = rows.filter((row) => row.preparacion === "Listo").length;
+  const usage = budget ? (used * 100) / budget : null;
+  return (
+    <div className="report-summary vertical">
+      <KpiTiles items={[
+        ["Consumo total", `${used.toFixed(0)} W`, null, budget ? `de ${budget.toFixed(0)} W de presupuesto` : null],
+        ["Uso del presupuesto", usage === null ? "—" : percentText(usage), usage === null ? null : usageLevel(usage)],
+        ["Puertos en falla", faults, faults ? "critical" : null, "El switch no puede energizar"],
+        ["Switches con margen", `${ready} / ${rows.length}`, null, "Listos para más equipos PoE"],
+      ]} />
+      <TopBars
+        title="Uso del presupuesto PoE por switch"
+        rows={rows}
+        label={(row) => row.switch}
+        value={(row) => row.uso_pct}
+        level={(row) => (row.puertos_falla || row.uso_pct >= 90 ? "critical" : row.uso_pct >= 75 ? "warning" : "ok")}
+        format={percentText}
+        max={100}
+      />
+      <MarkLegend levels={["ok", "warning", "critical"]} labels={{ ok: "Menos de 75 %", warning: "75 % a 89 %", critical: "90 % o más, o puertos en falla" }} />
+    </div>
+  );
+}
+
+function HardwareSummary({ rows }) {
+  const count = (level) => rows.filter((row) => row.estado === level).length;
+  const slices = useMemo(() => [
+    ["Normal", rows.filter((row) => row.estado === "ok").length, "ok"],
+    ["Advertencia", rows.filter((row) => row.estado === "warning").length, "warning"],
+    ["Problema", rows.filter((row) => row.estado === "critical").length, "critical"],
+  ], [rows]);
+  const temperatures = rows.filter((row) => row.valor !== null && row.valor !== "" && Number.isFinite(Number(row.valor)));
+  return (
+    <div className="report-summary">
+      <div className="report-summary vertical">
+        <KpiTiles items={[
+          ["Componentes", rows.length],
+          ["Con problema", count("critical"), count("critical") ? "critical" : null],
+          ["Con advertencia", count("warning"), count("warning") ? "warning" : null],
+        ]} />
+        <TopBars
+          title="Temperatura más alta"
+          rows={temperatures}
+          label={(row) => `${row.switch} · ${row.componente}`}
+          value={(row) => Number(row.valor)}
+          level={(row) => (MARKS[row.estado] ? row.estado : "info")}
+          format={(value) => `${value} °C`}
+        />
+      </div>
+      <Donut slices={slices} label="Componentes por estado" center={rows.length} />
+    </div>
+  );
+}
+
+const SUMMARIES = {
+  inventario: InventorySummary,
+  disponibilidad: AvailabilitySummary,
+  opticas: OpticsBars,
+  "puertos-sin-uso": UnusedPorts,
+  "puertos-inestables": FlappingPorts,
+  "puertos-saturados": SaturatedPorts,
+  "puertos-errores": ErrorPorts,
+  poe: PoeSummary,
+  hardware: HardwareSummary,
+};
+
+/** Reportes con resumen gráfico arriba de la tabla de detalle. */
+export const SUMMARY_KINDS = Object.keys(SUMMARIES);
+
+/** Resumen gráfico del reporte (indicadores y barras); nada si no hay filas. */
+export function ReportSummary({ kind, rows }) {
+  const Summary = SUMMARIES[kind];
+  if (!Summary || !rows.length) return null;
+  return <Summary rows={rows} />;
+}

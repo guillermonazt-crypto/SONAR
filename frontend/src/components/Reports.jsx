@@ -6,7 +6,7 @@ import SonarDataTable from "./DataTable";
 import LineChart from "./LineChart";
 import TopologyMap from "./TopologyMap";
 import { useViewState } from "../utils/viewState";
-import { AvailabilitySummary, DeviceCards, InventorySummary, KpiTiles, Mark, OpticsBars, TypeLabel } from "./ReportVisuals";
+import { DeviceCards, KpiTiles, Mark, ReportSummary, SUMMARY_KINDS, TypeLabel } from "./ReportVisuals";
 
 // [tipo, etiqueta, parámetro opcional {clave, etiqueta, valor, opciones}]
 const REPORTS = [
@@ -31,7 +31,7 @@ const GROUPS = [
   ["Históricos", ["tendencias"]],
 ];
 // Reportes con resumen gráfico arriba de la tabla de detalle.
-const VISUAL = ["inventario", "disponibilidad", "opticas", "tendencias"];
+const VISUAL = [...SUMMARY_KINDS, "tendencias"];
 const LEVEL_TEXT = { ok: "Normal", warning: "Atención", critical: "En riesgo" };
 
 function cell(key, value) {
@@ -245,9 +245,7 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
             {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} rows={data.filas} />}
-            {kind === "inventario" && data.filas.length > 0 && <InventorySummary rows={data.filas} />}
-            {kind === "disponibilidad" && <AvailabilitySummary rows={data.filas} />}
-            {kind === "opticas" && <OpticsBars rows={data.filas} />}
+            <ReportSummary kind={kind} rows={data.filas} />
             {kind === "aps-telefonos" ? (
               <DeviceCards rows={rows} onOpenPort={onOpenPort} printing={printing} />
             ) : (
