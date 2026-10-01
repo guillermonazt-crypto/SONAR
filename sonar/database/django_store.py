@@ -16,7 +16,7 @@ def record_poll(dispositivo, datos, verificacion=None):
             connections.close_all()
 
 
-def _monitor_state(name):
+def _monitor_state(name, **kwargs):
     import os
     # Con inventario YAML el worker no escribe en Django.
     if os.getenv('INVENTORY_SOURCE', 'django') != 'django':
@@ -27,7 +27,7 @@ def _monitor_state(name):
     with _lock:
         close_old_connections()
         try:
-            getattr(services, name)()
+            getattr(services, name)(**kwargs)
         finally:
             connections.close_all()
 
@@ -37,8 +37,9 @@ def mark_worker_started():
     _monitor_state('mark_worker_started')
 
 
-def worker_heartbeat():
-    _monitor_state('worker_heartbeat')
+def worker_heartbeat(influx=None):
+    """Latido del worker (cada WORKER_HEARTBEAT_SECONDS) con el estado de InfluxDB {disponible, en_cola}."""
+    _monitor_state('worker_heartbeat', influx=influx)
 
 
 def notify_alerts(dispositivo):

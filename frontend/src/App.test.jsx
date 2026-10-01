@@ -24,6 +24,7 @@ vi.mock("./api/client", () => ({
     portHistory: vi.fn(),
     switchHistory: vi.fn(),
     summary: vi.fn(),
+    monitoring: vi.fn(),
     search: vi.fn(),
     optics: vi.fn(),
     alertSummary: vi.fn(),
@@ -35,6 +36,7 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
   api.alertSummary.mockResolvedValue({ abiertas: 0, sin_reconocer: 0 });
+  api.monitoring.mockResolvedValue({ worker_offline: false, influx: { disponible: true, en_cola: 0 } });
   api.discovered.mockResolvedValue([]);
   api.report.mockResolvedValue({ tipo: "topologia", titulo: "Topología", descripcion: "", columnas: [], filas: [] });
   api.zabbix.mockResolvedValue({ configured: false, hosts: [], detail: "No configurado" });

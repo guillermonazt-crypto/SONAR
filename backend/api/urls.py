@@ -14,6 +14,7 @@ urlpatterns = [path('auth/session/', views.session), path('auth/login/', views.s
                path('puertos/<int:pk>/historial/', views.port_history),
                path('switches/<int:pk>/historial/', views.switch_history),
                path('resumen/', views.summary),
+               path('monitoreo/', views.monitoring),
                path('buscar/', views.search),
                path('opticas/', views.optics),
                path('opticas/prediccion/', views.optics_prediction),

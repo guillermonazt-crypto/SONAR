@@ -82,6 +82,7 @@ export const api = {
   zabbix: () => request("integrations/zabbix/"),
   portHistory: (id) => request(`puertos/${id}/historial/`),
   switchHistory: (id) => request(`switches/${id}/historial/`),
+  monitoring: () => request("monitoreo/"),
   summary: (refresh = false, plantel = "") => request(`resumen/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
   optics: (refresh = false, plantel = "") => request(`opticas/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
   search: (query, plantel = "") => request(`buscar/${queryString({ q: query, plantel })}`),

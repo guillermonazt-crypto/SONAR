@@ -149,6 +149,23 @@ def _alive_by(switch):
     return [METHOD_LABEL[m] for m in ('icmp', 'vecinos') if checks.get(m) is True]
 
 
+# Sin latido del worker en este tiempo la UI avisa "worker offline, datos congelados".
+WORKER_OFFLINE_MINUTES = 5
+
+
+def worker_offline(state, now):
+    """True si el worker no ha escrito su latido en WORKER_OFFLINE_MINUTES (o nunca)."""
+    return state.latido is None or now - state.latido > timedelta(minutes=WORKER_OFFLINE_MINUTES)
+
+
+def monitoring_status(state, now):
+    """Estado del worker y de InfluxDB para el banner de la UI."""
+    return dict(iniciado=state.iniciado and state.iniciado.isoformat(),
+                latido=state.latido and state.latido.isoformat(),
+                iniciando=in_grace(state.iniciado, now), worker_offline=worker_offline(state, now),
+                influx=dict(disponible=state.influx_disponible, en_cola=state.influx_en_cola))
+
+
 def connection_state(switch, started, now):
     """('activo' | 'iniciando' | 'inactivo', motivo o None) de la lectura SNMP de un switch.
 

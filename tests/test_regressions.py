@@ -65,11 +65,12 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_inventory_reloaded_and_writer_closed(self):
         writer = Mock()
-        with patch.object(worker, "validate_snmp"), patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])),                 patch.object(worker, "mark_worker_started") as started, patch.object(worker, "worker_heartbeat") as beat:
+        with patch.object(worker, "validate_snmp"), patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])),                 patch.object(worker, "mark_worker_started") as started, patch.object(worker, "worker_heartbeat") as beat,                 patch.object(worker, "_latidos", AsyncMock()) as latidos:
             with self.assertRaises(asyncio.CancelledError):
                 await worker.main()
         # Arranque registrado una vez (abre la gracia) y un latido por ciclo completo.
         started.assert_called_once()
+        latidos.assert_called_once_with(writer)
         self.assertEqual(beat.call_count, 2)
         self.assertEqual(load.call_count, 2)
         self.assertEqual(cycle.await_args_list[1].args[0], [])

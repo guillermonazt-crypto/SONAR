@@ -5,6 +5,7 @@ import GlobalSearch from "./components/GlobalSearch";
 import Login from "./components/Login";
 import RefreshControl from "./components/RefreshControl";
 import Sidebar, { SECTIONS } from "./components/Sidebar";
+import WorkerBanner from "./components/WorkerBanner";
 import { usePref } from "./utils/prefs";
 import { useAutoRefresh, useRefreshInterval } from "./utils/refresh";
 import { loadSite, saveSite } from "./utils/site";
@@ -194,6 +195,7 @@ export default function App() {
             </button>
           </div>
         </header>
+        <WorkerBanner />
         <div className="view" key={view}>
           <Suspense
             fallback={

@@ -10,12 +10,23 @@
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 # pyrefly: ignore [missing-import]
 from influxdb_client.client.write_api import SYNCHRONOUS
+from collections import deque
 from datetime import datetime, timezone
+import os
+import threading
+import time
 
 from sonar.utils.logger import get_logger
 from sonar.utils import config
 
 log = get_logger(__name__)
+
+# Si InfluxDB no responde, las métricas esperan en una cola local acotada (las
+# más antiguas se descartan al llenarse) y se reintenta como mucho una vez por
+# INFLUX_RETRY_SECONDS, sin frenar el ciclo de sondeo.
+INFLUX_QUEUE_MAX = int(os.getenv("INFLUX_QUEUE_MAX", "100000"))
+INFLUX_RETRY_SECONDS = float(os.getenv("INFLUX_RETRY_SECONDS", "30"))
+INFLUX_TIMEOUT_MS = int(os.getenv("INFLUX_TIMEOUT_MS", "5000"))
 
 
 class InfluxWriter:
@@ -29,7 +40,7 @@ class InfluxWriter:
     - timestamp: cuando se tomo la medicion
     """
 
-    def __init__(self):
+    def __init__(self, clock=time.monotonic, queue_max=INFLUX_QUEUE_MAX, retry_seconds=INFLUX_RETRY_SECONDS):
         """
         Inicializa la conexion con InfluxDB usando los valores del .env
         """
@@ -37,11 +48,61 @@ class InfluxWriter:
             url=config.INFLUX_URL,
             token=config.INFLUX_TOKEN,
             org=config.INFLUX_ORG,
+            timeout=INFLUX_TIMEOUT_MS,
         )
         self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
         self.bucket = config.INFLUX_BUCKET
         self.org = config.INFLUX_ORG
+        self._clock = clock
+        self._retry_seconds = retry_seconds
+        self._queue = deque(maxlen=queue_max)
+        self._lock = threading.Lock()
+        self._offline = False
+        self._retry_at = 0.0
         log.info(f"InfluxDB conectado en {config.INFLUX_URL}")
+
+    def estado(self) -> dict:
+        """{disponible, en_cola}: se reporta a Django con el latido del worker."""
+        with self._lock:
+            return dict(disponible=not self._offline, en_cola=len(self._queue))
+
+    @staticmethod
+    def _lines(record) -> list:
+        records = record if isinstance(record, list) else [record]
+        return [item if isinstance(item, str) else item.to_line_protocol() for item in records]
+
+    def _write(self, record) -> bool:
+        """Escribe `record` (Point o lista); si InfluxDB no responde lo encola y devuelve False."""
+        with self._lock:
+            if self._offline and self._clock() < self._retry_at:
+                self._queue.extend(self._lines(record))
+                return False
+            # Un solo hilo reintenta por ventana; los demás encolan mientras tanto.
+            self._retry_at = self._clock() + self._retry_seconds
+            backlog = list(self._queue)
+            self._queue.clear()
+        try:
+            if backlog:
+                self.write_api.write(bucket=self.bucket, org=self.org, record=backlog,
+                                     write_precision=WritePrecision.S)
+            self.write_api.write(bucket=self.bucket, org=self.org, record=record)
+        except Exception as error:
+            with self._lock:
+                # Lo pendiente va antes de lo que otros hilos encolaron durante el intento.
+                pending = backlog + self._lines(record) + list(self._queue)
+                self._queue.clear()
+                self._queue.extend(pending)
+                was_online, self._offline = not self._offline, True
+                queued = len(self._queue)
+            if was_online:
+                log.warning(f"InfluxDB no disponible ({error}); las métricas se encolan ({queued}) "
+                            f"y se reintenta cada {self._retry_seconds:g}s sin pausar el sondeo.")
+            return False
+        with self._lock:
+            recovered, self._offline = self._offline, False
+        if recovered:
+            log.info(f"InfluxDB disponible de nuevo; se enviaron {len(backlog)} métricas en cola.")
+        return True
 
     def escribir_cpu(self, datos: dict) -> None:
         """
@@ -64,7 +125,7 @@ class InfluxWriter:
             .time(datetime.now(timezone.utc), WritePrecision.S)
         )
 
-        self.write_api.write(bucket=self.bucket, org=self.org, record=punto)
+        self._write(punto)
         log.info(f"[{datos['nombre']}] CPU escrito -> "
                  f"5s={datos['cpu_5s']}% "
                  f"1m={datos['cpu_1m']}% "
@@ -84,7 +145,7 @@ class InfluxWriter:
         for key, value in fields.items():
             point.field(key, value)
         point.time(datetime.now(timezone.utc), WritePrecision.S)
-        self.write_api.write(bucket=self.bucket, org=self.org, record=point)
+        self._write(point)
 
     def escribir_interfaces(self, datos: dict) -> None:
         """
@@ -115,7 +176,7 @@ class InfluxWriter:
             puntos.append(punto)
 
         if puntos:
-            self.write_api.write(bucket=self.bucket, org=self.org, record=puntos)
+            self._write(puntos)
 
         log.info(f"[{datos['nombre']}] "
                  f"{len(datos['interfaces'])} interfaces escritas en InfluxDB")
@@ -155,7 +216,7 @@ class InfluxWriter:
             puntos.append(punto)
 
         if puntos:
-            self.write_api.write(bucket=self.bucket, org=self.org, record=puntos)
+            self._write(puntos)
 
         log.info(f"[{datos['nombre']}] "
                  f"{len(transceptores)} transceptores escritos en InfluxDB")

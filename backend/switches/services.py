@@ -147,10 +147,13 @@ def mark_worker_started(now=None):
     EstadoMonitoreo.objects.update_or_create(pk=1, defaults=dict(iniciado=now, latido=now))
 
 
-def worker_heartbeat(now=None):
-    """Ciclo de sondeo terminado."""
+def worker_heartbeat(now=None, influx=None):
+    """Latido del worker; `influx` = {disponible, en_cola} de su cola local de métricas."""
     now = now or timezone.now()
-    EstadoMonitoreo.objects.update_or_create(pk=1, defaults=dict(latido=now))
+    values = dict(latido=now)
+    if influx is not None:
+        values.update(influx_disponible=influx.get('disponible'), influx_en_cola=influx.get('en_cola') or 0)
+    EstadoMonitoreo.objects.update_or_create(pk=1, defaults=values)
 
 
 # Sondeos SNMP fallidos seguidos antes de considerar caído un switch (sin flip en un solo sondeo).

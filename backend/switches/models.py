@@ -76,7 +76,11 @@ class EstadoMonitoreo(models.Model):
     "iniciando" durante health.GRACE_MINUTES en lugar de marcarse caídos.
     """
     iniciado = models.DateTimeField(null=True, blank=True)
+    # El worker escribe el latido cada 30 s (sonar.main.HEARTBEAT_SECONDS), con
+    # el estado de InfluxDB: sin conexión, las métricas esperan en su cola local.
     latido = models.DateTimeField(null=True, blank=True)
+    influx_disponible = models.BooleanField(null=True, default=None)
+    influx_en_cola = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name = "Estado del monitoreo"

@@ -7,7 +7,9 @@
 # Loop de monitoreo continuo con switches reales via SNMP.
 
 import asyncio
+import os
 import time
+from functools import partial
 
 from sonar.utils.logger import get_logger
 from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNMP_CONCURRENCY
@@ -19,6 +21,9 @@ from sonar.discovery import Scheduler as DiscoveryScheduler
 from sonar.database.django_store import BackupScheduler
 
 log = get_logger(__name__)
+
+# Latido independiente del ciclo: la UI avisa "worker offline" si falta 5 min.
+HEARTBEAT_SECONDS = float(os.getenv("WORKER_HEARTBEAT_SECONDS", "30"))
 
 
 # InfluxDB sólo guarda el histórico: si está apagado el sondeo cuenta como
@@ -119,6 +124,13 @@ async def _estado_monitoreo(registrar) -> None:
         log.exception("No se pudo registrar el estado del monitoreo")
 
 
+async def _latidos(writer: InfluxWriter) -> None:
+    """Escribe el latido cada HEARTBEAT_SECONDS mientras el worker siga vivo, aunque un ciclo tarde."""
+    while True:
+        await _estado_monitoreo(partial(worker_heartbeat, writer.estado()))
+        await asyncio.sleep(HEARTBEAT_SECONDS)
+
+
 async def main() -> None:
     """
     Loop principal de SONAR con switches reales.
@@ -133,6 +145,7 @@ async def main() -> None:
     discovery = DiscoveryScheduler()
     backups = BackupScheduler()
     await _estado_monitoreo(mark_worker_started)
+    latidos = asyncio.create_task(_latidos(writer))
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
@@ -143,7 +156,7 @@ async def main() -> None:
                 log.exception("No se pudo recargar el inventario; se omite este ciclo")
             else:
                 await ejecutar_ciclo(inventario, writer)
-                await _estado_monitoreo(worker_heartbeat)
+                await _estado_monitoreo(partial(worker_heartbeat, writer.estado()))
                 # Tareas lentas y opcionales (DISCOVERY_ENABLED / BACKUP_ENABLED).
                 await discovery.maybe_run()
                 await backups.maybe_run()
@@ -154,6 +167,7 @@ async def main() -> None:
         log.info("SONAR detenido por el usuario.")
 
     finally:
+        latidos.cancel()
         await asyncio.to_thread(writer.cerrar)
         log.info("Hasta luego.")
 

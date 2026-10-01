@@ -11,8 +11,8 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
-from switches.health import (LEVEL_RANK, STALE_MINUTES, assess, connection_state, in_grace, port_stats, reason_type,
-                             summarize_sites, thresholds_by_role)
+from switches.health import (LEVEL_RANK, STALE_MINUTES, assess, connection_state, in_grace, monitoring_status,
+                             port_stats, reason_type, summarize_sites, thresholds_by_role)
 from switches import backups, discovery
 from switches.models import (Alerta, Descubierto, EstadoMonitoreo, Mantenimiento, Puerto, Respaldo, Switch,
                              UmbralOptico)
@@ -172,9 +172,7 @@ def build_summary(now=None, plantel=None):
         ultima_lectura=last.isoformat() if last else None,
         worker_atrasado=bool(items) and not in_grace(worker.iniciado, now) and (
             last is None or (now - last).total_seconds() > STALE_MINUTES * 60),
-        monitoreo=dict(iniciado=worker.iniciado and worker.iniciado.isoformat(),
-                       latido=worker.latido and worker.latido.isoformat(),
-                       iniciando=in_grace(worker.iniciado, now)),
+        monitoreo=monitoring_status(worker, now),
         umbrales=thresholds,
         historial_detalle=detail,
         planteles=site_summary(switches, items, alerts.values(), now, plantel),
@@ -211,6 +209,13 @@ def summary(request):
         data = build_summary(plantel=plantel)
         cache.set(key, data, SUMMARY_CACHE_SECONDS)
     return JsonResponse(data)
+
+
+@require_GET
+@requires_session
+def monitoring(request):
+    """GET /api/monitoreo/: latido del worker (sin caché) para el banner "worker offline"."""
+    return JsonResponse(monitoring_status(EstadoMonitoreo.actual(), timezone.now()))
 
 
 @require_GET
