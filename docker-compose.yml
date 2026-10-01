@@ -1,15 +1,101 @@
-﻿version: "3.8"
+# SONAR completo: Nginx (HTTPS) + Django + worker SNMP + PostgreSQL + InfluxDB + Grafana.
+# Todas las credenciales vienen de .env (copia .env.example).
+# InfluxDB y Grafana sólo escuchan en 127.0.0.1 del servidor.
 
 networks:
   sonar_net:
     driver: bridge
 
 volumes:
+  postgres_data:
   influxdb_data:
   influxdb_config:
   grafana_data:
+  static_files:
+  certs:
+
+x-backend: &backend
+  build: .
+  env_file: .env
+  restart: unless-stopped
+  networks:
+    - sonar_net
+  environment:
+    DJANGO_DB_ENGINE: postgres
+    POSTGRES_HOST: postgres
+    INFLUX_URL: http://influxdb:8086
+    INVENTORY_SOURCE: django
+    DJANGO_BEHIND_PROXY: "true"
+    DJANGO_STATIC_ROOT: /app/staticfiles
+  depends_on:
+    postgres:
+      condition: service_healthy
+    influxdb:
+      condition: service_healthy
 
 services:
+
+  web:
+    build: ./frontend
+    container_name: sonar_web
+    restart: unless-stopped
+    networks:
+      - sonar_net
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SONAR_HOSTNAME: ${SONAR_HOSTNAME:-sonar.local}
+    volumes:
+      - static_files:/srv/static:ro
+      - ${SONAR_CERTS_DIR:-certs}:/etc/nginx/certs
+    depends_on:
+      django:
+        condition: service_healthy
+
+  django:
+    <<: *backend
+    container_name: sonar_django
+    command: >
+      sh -c "python backend/manage.py migrate --noinput &&
+             python backend/manage.py collectstatic --noinput &&
+             gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    volumes:
+      - static_files:/app/staticfiles
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/session/', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  worker:
+    <<: *backend
+    container_name: sonar_worker
+    command: python -m sonar.main
+    depends_on:
+      django:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sonar_postgres
+    restart: unless-stopped
+    networks:
+      - sonar_net
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sonar}
+      POSTGRES_USER: ${POSTGRES_USER:-sonar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   influxdb:
     image: influxdb:2.7
@@ -18,18 +104,23 @@ services:
     networks:
       - sonar_net
     ports:
-      - "8086:8086"
+      - "127.0.0.1:8086:8086"
     volumes:
       - influxdb_data:/var/lib/influxdb2
       - influxdb_config:/etc/influxdb2
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: sonar_admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: sonar_password_2024
-      DOCKER_INFLUXDB_INIT_ORG: universidad
-      DOCKER_INFLUXDB_INIT_BUCKET: red_universitaria
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: sonar-super-secret-token-changeme
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER:-sonar_admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD:?Define INFLUX_ADMIN_PASSWORD en .env}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-universidad}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-red_universitaria}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?Define INFLUX_TOKEN en .env}
       DOCKER_INFLUXDB_INIT_RETENTION: 2160h
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   grafana:
     image: grafana/grafana-oss:10.4.2
@@ -38,15 +129,15 @@ services:
     networks:
       - sonar_net
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: sonar_grafana_2024
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Define GRAFANA_ADMIN_PASSWORD en .env}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
+      GF_SECURITY_COOKIE_SECURE: "true"
     depends_on:
       - influxdb

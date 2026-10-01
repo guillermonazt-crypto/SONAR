@@ -1,0 +1,11 @@
+.env
+.venv
+**/__pycache__
+**/node_modules
+frontend/dist
+backend/db.sqlite3
+backend/staticfiles
+inventory/devices.yaml
+scripts/local
+.local-backup
+deploy/certs

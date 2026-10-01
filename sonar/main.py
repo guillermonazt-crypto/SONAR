@@ -10,10 +10,12 @@ import asyncio
 import time
 
 from sonar.utils.logger import get_logger
-from sonar.utils.config import load_inventory, POLL_INTERVAL
+from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNMP_CONCURRENCY
 from sonar.database.influx_writer import InfluxWriter
-from sonar.database.django_store import record_poll
+from sonar.database.django_store import record_poll, notify_alerts
 from sonar.collector.snmp_collector import obtener_datos_reales
+from sonar.discovery import Scheduler as DiscoveryScheduler
+from sonar.database.django_store import BackupScheduler
 
 log = get_logger(__name__)
 
@@ -35,6 +37,7 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
         datos = await obtener_datos_reales(dispositivo)
 
         await asyncio.to_thread(record_poll, dispositivo, datos)
+        await asyncio.to_thread(notify_alerts, dispositivo)
 
         if not datos:
             log.warning(f"[{nombre}] Sin datos, saltando...")
@@ -61,8 +64,15 @@ async def ejecutar_ciclo(inventario: list, writer: InfluxWriter) -> None:
     inicio = time.time()
     log.info(f"━━━ Iniciando ciclo: {len(inventario)} dispositivos ━━━")
 
-    # Consulta todos los switches simultaneamente
-    tareas = [procesar_switch(d, writer) for d in inventario]
+    # Consulta en paralelo con un límite para no saturar UDP ni provocar
+    # timeouts falsos cuando el inventario crece.
+    limite = asyncio.Semaphore(max(1, SNMP_CONCURRENCY))
+
+    async def con_limite(dispositivo):
+        async with limite:
+            return await procesar_switch(dispositivo, writer)
+
+    tareas = [con_limite(d) for d in inventario]
     resultados = await asyncio.gather(*tareas, return_exceptions=True)
 
     exitosos = sum(1 for r in resultados if r is True)
@@ -72,6 +82,9 @@ async def ejecutar_ciclo(inventario: list, writer: InfluxWriter) -> None:
     log.info(f"━━━ Ciclo completo en {duracion}s | "
              f" ok {exitosos} exitosos | "
              f" x {fallidos} fallidos ━━━")
+    if duracion > POLL_INTERVAL:
+        log.warning(f"El ciclo tardó {duracion}s, más que el intervalo de {POLL_INTERVAL}s. "
+                    "Sube SNMP_CONCURRENCY o POLL_INTERVAL_SECONDS.")
 
 
 async def main() -> None:
@@ -83,7 +96,10 @@ async def main() -> None:
     log.info(f"  Intervalo: {POLL_INTERVAL} segundos")
     log.info("=" * 55)
 
+    validate_snmp()
     writer = InfluxWriter()
+    discovery = DiscoveryScheduler()
+    backups = BackupScheduler()
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
@@ -94,6 +110,9 @@ async def main() -> None:
                 log.exception("No se pudo recargar el inventario; se omite este ciclo")
             else:
                 await ejecutar_ciclo(inventario, writer)
+                # Tareas lentas y opcionales (DISCOVERY_ENABLED / BACKUP_ENABLED).
+                await discovery.maybe_run()
+                await backups.maybe_run()
             log.info(f"Esperando {POLL_INTERVAL}s...\n")
             await asyncio.sleep(POLL_INTERVAL)
 

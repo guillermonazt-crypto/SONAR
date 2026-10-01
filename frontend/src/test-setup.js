@@ -21,3 +21,8 @@ globalThis.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
+
+// La vista abierta (pestaña, switch, puerto) se recuerda en sessionStorage:
+// cada prueba empieza desde cero.
+import { beforeEach } from "vitest";
+beforeEach(() => sessionStorage.clear());

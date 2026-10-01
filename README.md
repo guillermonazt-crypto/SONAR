@@ -38,6 +38,7 @@ Activa `.venv` y ejecuta desde la raíz:
 python -m pip install -r requirements.txt
 # Solo para una instalación nueva: copia .env.example a .env.
 # Define SECRET_KEY sin sobrescribir las demás credenciales.
+# En desarrollo local deja DJANGO_DEBUG=true (el valor por defecto ahora es false).
 python backend/manage.py migrate
 # Solo si necesitas crear una cuenta administradora:
 python backend/manage.py createsuperuser
@@ -65,6 +66,9 @@ máquina; si cambia, actualiza `frontend/.env.local` y
 
 INVENTORY_SOURCE=django conecta el worker al mismo inventario que React.
 Para iniciar sondeos reales, cuando estés listo: `python -m sonar.main`.
+El worker exige credenciales SNMP explícitas: `SNMP_COMMUNITY` (v2c) o
+`SNMP_VERSION=3` con `SNMP_V3_USER`, `SNMP_V3_AUTH_KEY` y `SNMP_V3_PRIV_KEY`
+(recomendado). Ya no existe la comunidad `public` por defecto.
 No es necesario iniciar el worker para usar o probar la interfaz.
 Las variables `VITE_*` son públicas: nunca pongas secretos en ellas.
 
@@ -77,12 +81,122 @@ y descarta interfaces lógicas como VLAN, Loopback, Stack y Port-channel.
 
 Al seleccionar un puerto se muestran descripción, estado, errores, IP/MAC, VLAN,
 Voice VLAN, MAC del teléfono y tráfico de entrada/salida. La velocidad se calcula
-en memoria entre dos lecturas consecutivas y no se guarda como historial en Django;
-el panel actualiza la lectura cada tres minutos.
+entre dos lecturas consecutivas del worker y no se guarda como historial en Django.
+
+Las vistas se refrescan solas: el selector del encabezado permite cada 3 s (por
+defecto), 5 s, 30 s o desactivarlo. El refresco se pausa con la pestaña oculta y
+el switch, puerto, pestaña y carpetas abiertas se conservan al recargar la página.
+
+La tabla MAC se lee en todas las VLAN con puertos asignados, no sólo en la VLAN 1:
+en Cisco cada VLAN tiene su propia tabla y se consulta con la comunidad indexada
+`comunidad@vlan` (v2c) o el contexto `vlan-N` (v3; el usuario necesita acceso a esos
+contextos). `SNMP_MAX_VLANS` (32) limita cuántas por ciclo. Cada MAC queda en un solo
+puerto: el que menos MAC aprende (el de acceso), no el troncal por donde también pasa.
 
 Los datos de voz, CDP, VLAN y DHCP snooping se muestran sólo cuando el equipo los
 publica. Los OID específicos de un fabricante son enriquecimientos opcionales;
 estado, alias, errores y tráfico se obtienen con MIBs estándar.
+
+## Resumen, umbrales y alertas
+
+La pestaña **Resumen** usa un solo endpoint (`/api/resumen/`, caché de 60 s) con el
+estado verde/amarillo/rojo de cada switch, sus motivos, conteos de puertos físicos
+y el histórico de 24 h (CPU, memoria y tráfico total) agrupado por plantel.
+Las reglas viven en `backend/switches/health.py`; los umbrales de CPU y memoria se
+editan por rol (core, distribución, acceso) en el admin Django, en **Umbrales por rol**.
+
+El tablero **Estado por plantel** (arriba del Resumen) muestra cada plantel activo con
+el peor estado de sus equipos (mismas reglas de `health.py`), cuántos responden a SNMP,
+puertos activos, alertas abiertas y puertos con errores. Al elegir un plantel se filtra
+el análisis por equipo. Los planteles sin equipos aparecen como "Sin equipos".
+
+En Resumen y en Alertas los filtros se combinan (plantel, estado de salud y tipo de
+problema: SNMP, CPU, memoria, errores, inestables, saturación, hardware, PoE…) y se
+recuerdan al recargar, igual que la pestaña y el switch abiertos. El API acepta
+`/api/alertas/?plantel=<id>&tipo=<tipo>&estado=abiertas|cerradas&sin_reconocer=1`.
+
+Los errores de puerto se evalúan por ciclo (`errores_nuevos`, `ultimo_error`), no
+por el contador acumulado desde el arranque del equipo.
+
+El worker envía una alerta cuando un switch pasa a rojo y otra cuando se recupera,
+con un cooldown (`ALERT_COOLDOWN_MINUTES`). Canales opcionales en `.env`: correo
+(`ALERT_EMAIL_TO` + `EMAIL_*`), Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
+y webhook de Teams/Slack/Google Chat (`ALERT_WEBHOOK_URL`).
+
+**PoE.** Un puerto PoE en falla pone el switch en atención. El reporte PoE muestra
+además el margen disponible (W), puertos PoE libres y cuántos equipos más caben
+(802.3af 15.4 W / PoE+ 30 W), con una columna "Preparación" para planear altas.
+
+**Alertas inteligentes.** Condición compuesta: si 3 o más puertos de un mismo switch
+tienen errores nuevos (o están inestables) a la vez, el switch pasa a rojo aunque cada
+puerto por separado sólo sería "atención"; el número se ajusta por rol (`puertos_riesgo`,
+0 lo desactiva). Escalamiento por rol: una alerta que sigue abierta y sin reconocer más
+de `escalar_minutos` (core 15, distribución 30, acceso 60 por defecto) se vuelve a
+avisar una sola vez por todos los canales y, además, a `ALERT_ESCALATION_EMAIL_TO`.
+Nunca hay dos alertas abiertas para el mismo switch: si aparecen duplicados se conserva
+la más antigua.
+
+La salud también considera el hardware (fuentes, ventiladores y temperatura por
+CISCO-ENVMON-MIB), el PoE al 90 % o más del presupuesto, los puertos inestables
+(4 o más cambios up/down en 1 h) y los puertos al 90 % o más de su capacidad.
+
+## Buscador, ópticas y centro de alertas
+
+- **Buscador global** (barra de pestañas): MAC en cualquier formato, IP completa o
+  parcial, MAC del teléfono, descripción de puerto o switch. Abre el puerto encontrado.
+- **Ópticas**: RX/TX, temperatura y degradación de cada SFP (`/api/opticas/`, lee
+  InfluxDB con caché de 30 s). Umbrales en el admin, **Umbrales ópticos**.
+- **Alertas**: cada episodio en rojo queda registrado; un editor lo reconoce con una
+  nota. Las **ventanas de mantenimiento** (por switch o plantel) registran las alertas
+  sin notificarlas.
+- **Bitácora de cambios** (Inventario, sólo editores): altas, ediciones, bajas,
+  reconocimientos, respaldos e inicios de sesión.
+- **Reportes → Tendencias**: CPU y memoria (promedio y máximo), tráfico promedio y pico,
+  reinicios, alertas y minutos en riesgo por switch en 7 o 30 días, con gráficas diarias
+  de toda la red. Lee el bucket de largo plazo `<INFLUX_BUCKET>_15m` (o
+  `INFLUX_TREND_BUCKET`) y, si no existe, el crudo. Si InfluxDB no responde, el reporte
+  sale igual con las alertas guardadas en Django y lo avisa.
+- **Reportes**: inventario, disponibilidad, puertos sin uso, inestables, saturados y
+  con errores, PoE, hardware, ópticas y topología CDP. En pantalla, CSV o impresos.
+
+El API responde `304 Not Modified` (ETag) cuando nada cambió, así el refresco cada
+3 s casi no transfiere datos.
+
+## Descubrimiento y respaldos (opcionales)
+
+Ambos están apagados por defecto; las variables están en `.env.example`.
+
+- `DISCOVERY_ENABLED=true` propone equipos fuera del inventario: vecinos CDP y, con
+  `DISCOVERY_SUBNETS`, un barrido SNMP limitado por `DISCOVERY_MAX_HOSTS`. Aparecen en
+  Inventario → **Equipos descubiertos**; nunca se agregan solos. A mano:
+  `python backend/manage.py descubrir`.
+- `BACKUP_ENABLED=true` respalda `show running-config` por SSH cada
+  `BACKUP_INTERVAL_HOURS` (requiere `pip install paramiko` y `BACKUP_SSH_USER`).
+  Sólo se guarda una versión cuando la configuración cambia; en Inventario →
+  **Respaldos** se ven las diferencias. Las contraseñas se ocultan salvo para
+  administradores. A mano: `python backend/manage.py respaldar_configs`.
+
+## Producción con Docker
+
+`docker compose up -d --build` levanta Nginx con HTTPS (puertos 80/443), Django con
+gunicorn, el worker, PostgreSQL, InfluxDB y Grafana. InfluxDB y Grafana sólo
+escuchan en `127.0.0.1` del servidor y Grafana ya no admite acceso anónimo.
+Completa en `.env` al menos `SECRET_KEY`, `POSTGRES_PASSWORD`, `INFLUX_ADMIN_PASSWORD`,
+`INFLUX_TOKEN`, `GRAFANA_ADMIN_PASSWORD`, `SONAR_HOSTNAME`, las credenciales SNMP,
+y agrega el nombre del servidor a `DJANGO_ALLOWED_HOSTS` y `https://<nombre>` a
+`DJANGO_CSRF_ORIGINS`. Sin certificados propios (`SONAR_CERTS_DIR` con `sonar.crt`
+y `sonar.key`) se genera uno autofirmado. Crea el administrador con
+`docker compose exec django python backend/manage.py createsuperuser`.
+
+Si el volumen de InfluxDB ya existía, cambiar las variables no rota las
+credenciales anteriores: cámbialas en la interfaz de InfluxDB.
+
+### Retención de InfluxDB
+
+`python scripts/setup_influx_downsampling.py` crea el bucket `<bucket>_15m`
+(400 días) y una tarea que guarda promedios de 15 min. `--read-token` crea un
+token de sólo lectura para Django (`INFLUX_READ_TOKEN`). `--raw-retention-days 14`
+reduce la retención del bucket crudo y **borra** los datos más antiguos.
 
 ## Integración opcional con Zabbix
 
@@ -121,8 +235,9 @@ no que se haya convertido en cero.
 
 ## Datos locales y estructura
 
-`.env`, `backend/db.sqlite3`, `.local-backup/`, scripts/local/, node_modules/ y
-frontend/dist/ están excluidos de Git. Los cambios de esquema se guardan en migraciones.
+`.env`, `backend/db.sqlite3`, `.local-backup/`, scripts/local/, node_modules/,
+frontend/dist/ e `inventory/devices.yaml` están excluidos de Git
+(`inventory/devices.example.yaml` es la plantilla). Los cambios de esquema se guardan en migraciones.
 La base anterior a React está respaldada en `.local-backup/before-react-django.sqlite3`.
 El módulo de settings Django es `config.settings`.
 

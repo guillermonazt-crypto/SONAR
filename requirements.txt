@@ -19,3 +19,10 @@ tenacity==8.2.3
 Django==6.0.7
 djangorestframework==3.17.1
 django-cors-headers==4.9.0
+
+# Producción (docker-compose): servidor WSGI. PostgreSQL va en requirements-prod.txt
+gunicorn==23.0.0
+
+# Opcional: respaldo de configuraciones por SSH (BACKUP_ENABLED=true).
+# Descomenta e instala sólo si lo vas a usar.
+# paramiko==3.5.1

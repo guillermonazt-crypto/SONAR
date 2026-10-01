@@ -1,0 +1,3 @@
+# Sólo para Docker/PostgreSQL (DJANGO_DB_ENGINE=postgres)
+-r requirements.txt
+psycopg[binary]==3.2.10

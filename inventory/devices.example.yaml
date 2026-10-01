@@ -1,0 +1,12 @@
+# SONAR - Ejemplo de inventario YAML (INVENTORY_SOURCE=yaml).
+# Copia a devices.yaml con tus IPs reales; devices.yaml no debe subirse a Git.
+devices:
+  - hostname: 192.0.2.1
+    name: SW_CORE_EJEMPLO
+    role: core
+    site: plantel_ejemplo
+
+  - hostname: 192.0.2.2
+    name: SW_ACCESO_EJEMPLO
+    role: access
+    site: plantel_ejemplo

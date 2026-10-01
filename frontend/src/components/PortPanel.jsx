@@ -1,8 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import { cssVar, useTheme } from "../utils/theme";
+import { loadView, saveView } from "../utils/viewState";
 import { Chart, CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend } from "chart.js";
 import { api } from "../api/client";
+import { formatBytes, formatRate, timeAgo } from "../utils/format";
+import { neighborType } from "../utils/neighbor";
+import NeighborTypeLabel from "./NeighborType";
 
 Chart.register(CategoryScale, LinearScale, BarElement, BarController, LineElement, PointElement, LineController, Tooltip, Legend);
+
+const POE_TEXT = {
+  deliveringPower: "Entregando energía",
+  searching: "Buscando dispositivo",
+  disabled: "Deshabilitado",
+  fault: "Falla",
+  otherFault: "Falla",
+  test: "En prueba",
+};
+
+function formatSpeed(mbps) {
+  if (!mbps) return null;
+  return mbps >= 1000 ? `${mbps / 1000} Gbps` : `${mbps} Mbps`;
+}
 
 const statusText = {
   up: "Activo",
@@ -58,34 +77,20 @@ function errorGuidance(port) {
   return "No hay contadores de error reportados.";
 }
 
-function formatBytes(value) {
-  if (!Number.isFinite(value)) return "Sin lectura";
-  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
-  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${value} B`;
-}
-
-function formatRate(value) {
-  if (!Number.isFinite(value)) return "Calculando…";
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)} Gbps`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)} Mbps`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)} Kbps`;
-  return `${value} bps`;
-}
-
 function TrafficChart({ input, output }) {
   const canvas = useRef(null);
+  const chart = useRef(null);
+  const theme = useTheme();
   useEffect(() => {
-    if (!canvas.current || !Number.isFinite(input) || !Number.isFinite(output)) return undefined;
-    const chart = new Chart(canvas.current, {
+    if (!canvas.current) return undefined;
+    const instance = new Chart(canvas.current, {
       type: "bar",
       data: {
         labels: ["Entrada", "Salida"],
         datasets: [{
           label: "Consumo",
-          data: [input, output],
-          backgroundColor: ["#00d4ff", "#9b7bff"],
+          data: [input || 0, output || 0],
+          backgroundColor: [cssVar("accent"), cssVar("violet")],
           borderRadius: 5,
           barThickness: 28,
         }],
@@ -95,18 +100,29 @@ function TrafficChart({ input, output }) {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatRate(context.raw) } } },
         scales: {
-          y: { beginAtZero: true, ticks: { color: "#a4abba", callback: (value) => formatRate(value) }, grid: { color: "#34394b" } },
-          x: { ticks: { color: "#c8d0df" }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: cssVar("muted"), callback: (value) => formatRate(value) }, grid: { color: cssVar("grid-line") } },
+          x: { ticks: { color: cssVar("text-2") }, grid: { display: false } },
         },
       },
     });
-    return () => chart.destroy();
+    chart.current = instance;
+    return () => {
+      instance.destroy();
+      chart.current = null;
+    };
+  }, [theme]);
+  // Cada refresco trae una tasa nueva: se actualizan las barras sin recrear la gráfica.
+  useEffect(() => {
+    if (!chart.current?.canvas) return;
+    chart.current.data.datasets[0].data = [input || 0, output || 0];
+    chart.current.update("none");
   }, [input, output]);
   return <div className="traffic-chart"><canvas ref={canvas} aria-label="Gráfica de consumo del puerto" /></div>;
 }
 
 function HistoryChart({ points }) {
   const canvas = useRef(null);
+  const theme = useTheme();
   useEffect(() => {
     if (!canvas.current || !points.length) return undefined;
     const chart = new Chart(canvas.current, {
@@ -114,25 +130,77 @@ function HistoryChart({ points }) {
       data: {
         labels: points.map((point) => new Date(point.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
         datasets: [
-          { label: "Entrada acumulada", data: points.map((point) => point.entrada), borderColor: "#00d4ff", backgroundColor: "#00d4ff33", tension: 0.25 },
-          { label: "Salida acumulada", data: points.map((point) => point.salida), borderColor: "#9b7bff", backgroundColor: "#9b7bff33", tension: 0.25 },
+          { label: "Entrada acumulada", data: points.map((point) => point.entrada), borderColor: cssVar("accent"), backgroundColor: cssVar("accent-ring"), tension: 0.25 },
+          { label: "Salida acumulada", data: points.map((point) => point.salida), borderColor: cssVar("violet"), backgroundColor: `${cssVar("violet")}33`, tension: 0.25 },
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#c8d0df" } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatBytes(context.raw)}` } } },
-        scales: { y: { ticks: { color: "#a4abba", callback: (value) => formatBytes(value) }, grid: { color: "#34394b" } }, x: { ticks: { color: "#a4abba" }, grid: { display: false } } },
+        plugins: { legend: { labels: { color: cssVar("text-2") } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatBytes(context.raw)}` } } },
+        scales: { y: { ticks: { color: cssVar("muted"), callback: (value) => formatBytes(value) }, grid: { color: cssVar("grid-line") } }, x: { ticks: { color: cssVar("muted") }, grid: { display: false } } },
       },
     });
     return () => chart.destroy();
-  }, [points]);
+  }, [points, theme]);
   return <div className="traffic-chart history-chart"><canvas ref={canvas} aria-label="Histórico de tráfico del puerto" /></div>;
 }
 
-export default function PortPanel({ device, items, loading, onClose }) {
+// Silueta del panel mientras llega la primera lectura: mismo tamaño que el real, sin datos inventados.
+function PortPanelSkeleton() {
+  return (
+    <div className="skeleton-panel" aria-hidden="true">
+      <div className="port-summary">
+        {[90, 90, 110, 70, 70].map((width, index) => <span key={index} className="skeleton skeleton-text" style={{ width }} />)}
+      </div>
+      <div className="switch-face">
+        <div className="switch-brand">
+          <span className="skeleton skeleton-text" style={{ width: 70 }} />
+          <span className="skeleton skeleton-text" style={{ width: 140 }} />
+        </div>
+        <div className="port-bank">
+          <span className="skeleton skeleton-text" style={{ width: 130 }} />
+          <div className="physical-grid">
+            {Array.from({ length: 24 }, (_, index) => <span key={index} className="physical-port skeleton" />)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose, onPortChange = () => {} }) {
   const [selected, setSelected] = useState(null);
+  const restoredPort = useRef(false);
+  async function openPort(port) {
+    restoredPort.current = true;
+    saveView("port", port.id);
+    setSelected(port);
+    onPortChange(port);
+    setHistoryLoading(port.id);
+    try {
+      const result = await api.portHistory(port.id);
+      setHistory((current) => ({ ...current, [port.id]: result.points || [] }));
+    } catch {
+      setHistory((current) => ({ ...current, [port.id]: [] }));
+    } finally {
+      setHistoryLoading((current) => (current === port.id ? null : current));
+    }
+  }
+  function closePort() {
+    saveView("port", null);
+    setSelected(null);
+    onPortChange(null);
+  }
+  // Tras recargar la página se vuelve a abrir el puerto que se estaba viendo.
+  useEffect(() => {
+    if (restoredPort.current || loading || !items.length) return;
+    restoredPort.current = true;
+    const port = items.find((item) => item.id === loadView("port"));
+    if (port) openPort(port);
+  }, [loading, items]);
   const [rates, setRates] = useState({});
   const [history, setHistory] = useState({});
+  const [historyLoading, setHistoryLoading] = useState(null);
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -145,21 +213,36 @@ export default function PortPanel({ device, items, loading, onClose }) {
     const now = Date.now();
     const next = {};
     items.forEach((port) => {
+      // El worker ya calcula la tasa entre sus dos últimos sondeos.
+      if (port.bps_entrada != null && port.bps_salida != null) {
+        next[port.id] = { input: port.bps_entrada, output: port.bps_salida };
+        return;
+      }
       const input = Number(port.octetos_entrada);
       const output = Number(port.octetos_salida);
+      if (!Number.isFinite(input) || !Number.isFinite(output)) return;
+      // Se mide contra la hora de la lectura del worker, no la del refresco:
+      // refrescar más rápido que el worker no debe dar tasas en cero.
+      const at = Date.parse(port.actualizado) || now;
       const previous = previousTraffic.current.get(port.id);
-      if (previous && now > previous.at && input >= previous.input && output >= previous.output) {
-        const seconds = (now - previous.at) / 1000;
-        next[port.id] = {
+      if (previous && at === previous.at) {
+        if (previous.rate) next[port.id] = previous.rate;
+        return;
+      }
+      let rate = null;
+      if (previous && at > previous.at && input >= previous.input && output >= previous.output) {
+        const seconds = (at - previous.at) / 1000;
+        rate = {
           input: Math.round(((input - previous.input) * 8) / seconds),
           output: Math.round(((output - previous.output) * 8) / seconds),
         };
+        next[port.id] = rate;
       }
-      if (Number.isFinite(input) && Number.isFinite(output)) {
-        previousTraffic.current.set(port.id, { input, output, at: now });
-      }
+      previousTraffic.current.set(port.id, { input, output, at, rate });
     });
     setRates(next);
+    // El detalle abierto muestra la lectura más reciente del mismo puerto.
+    setSelected((current) => (current && items.find((port) => port.id === current.id)) || current);
   }, [items]);
   const ordered = items
     .filter((port) => isPhysicalPort(port.nombre))
@@ -200,26 +283,22 @@ export default function PortPanel({ device, items, loading, onClose }) {
     const localNumber = localPortNumber(port.nombre, port.indice);
     const inputTraffic = Number(port.octetos_entrada) || 0;
     const outputTraffic = Number(port.octetos_salida) || 0;
+    // Sólo AP y teléfono llevan marca en el puerto: son los equipos finales que interesa ubicar.
+    const endpoint = ["ap", "telefono"].includes(port.vecino_tipo) ? neighborType(port.vecino_tipo) : null;
+    const neighbor = port.vecino_nombre ? ` · → ${neighborType(port.vecino_tipo)?.icon ? `${neighborType(port.vecino_tipo).icon} ` : ""}${port.vecino_nombre}` : "";
     return (
       <button
         type="button"
         className={`physical-port port-${state}${voice ? " port-voice" : ""}${trunk ? " port-trunk" : ""}${damaged ? " port-damaged" : ""}`}
         key={port.id}
-        data-tooltip={`${port.nombre}${port.descripcion ? ` · ${port.descripcion}` : ""} · ${statusText[state]}${trunk ? " · TRUNK" : ""}${voice ? ` · Voice VLAN ${port.voice_vlan}` : ""}${damaged ? " · DAÑADO" : ""} · ${errors} errores`}
+        data-tooltip={`${port.nombre}${port.descripcion ? ` · ${port.descripcion}` : ""} · ${statusText[state]}${trunk ? " · TRUNK" : ""}${voice ? ` · Voice VLAN ${port.voice_vlan}` : ""}${damaged ? " · DAÑADO" : ""}${neighbor}${port.uso_pct != null ? ` · ${Math.round(port.uso_pct)}% uso` : ""} · ${errors} errores`}
         aria-label={`${port.nombre}: ${statusText[state]}; ${errors} errores`}
-        onClick={async () => {
-          setSelected(port);
-          try {
-            const result = await api.portHistory(port.id);
-            setHistory((current) => ({ ...current, [port.id]: result.points || [] }));
-          } catch {
-            setHistory((current) => ({ ...current, [port.id]: [] }));
-          }
-        }}
+        onClick={() => openPort(port)}
       >
         <span className="port-led status-led" aria-hidden="true" />
         {voice && <span className="port-led voice-led" aria-label="Voice VLAN" />}
         {damaged && <span className="port-led damage-led" aria-label="Puerto dañado" />}
+        {endpoint && <span className={`port-endpoint endpoint-${port.vecino_tipo}`} aria-label={endpoint.label}>{endpoint.icon}</span>}
         <span>{localNumber}</span>
         <span className="traffic-meter" aria-hidden="true">
           <i className="traffic-in" style={{ width: `${(inputTraffic / maxTraffic) * 100}%` }} />
@@ -240,16 +319,39 @@ export default function PortPanel({ device, items, loading, onClose }) {
             estado
           </small>
         </div>
-        <button type="button" onClick={onClose}>
-          Cerrar
-        </button>
+        <div className="panel-actions">
+          {refreshing && !loading && (
+            <span className="refreshing-badge" role="status">
+              <i className="spinner" aria-hidden="true" />
+              Actualizando…
+            </span>
+          )}
+          <button type="button" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
       </div>
-      {loading ? (
-        <p role="status">Cargando puertos…</p>
-      ) : !ordered.length ? (
-        <p className="empty">
-          Aún no hay lecturas de puertos para este switch.
+      {failed && (
+        <p role="alert">
+          No se pudieron leer los puertos: {failed}
+          {ordered.length > 0 && " · se muestran los últimos datos conocidos."}{" "}
+          <button type="button" onClick={onRetry}>Reintentar</button>
         </p>
+      )}
+      {loading ? (
+        <>
+          <p role="status" className="loading-line">
+            <i className="spinner" aria-hidden="true" />
+            Cargando puertos de {device.nombre}…
+          </p>
+          <PortPanelSkeleton />
+        </>
+      ) : !ordered.length ? (
+        !failed && (
+          <p className="empty">
+            Aún no hay lecturas de puertos para este switch.
+          </p>
+        )
       ) : (
         <>
           <div className="port-summary" aria-label="Resumen de puertos">
@@ -314,17 +416,19 @@ export default function PortPanel({ device, items, loading, onClose }) {
                 <i className="legend-dot dot-damaged" />
                 Amarillo limón · Daño/error
               </span>
+              <span>📶 Access point</span>
+              <span>☎ Teléfono IP</span>
             </div>
           </div>
           {selected && (
-            <div className="port-detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
+            <div className="port-detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closePort()}>
             <section className="port-detail" role="dialog" aria-modal="true" aria-labelledby="port-detail-title" aria-live="polite">
               <div className="section-title">
                 <div>
                   <span className="eyebrow">DETALLE DEL PUERTO</span>
                   <h3 id="port-detail-title">{selected.nombre}</h3>
                 </div>
-                <button type="button" onClick={() => setSelected(null)}>
+                <button type="button" onClick={closePort}>
                   Cerrar detalle
                 </button>
               </div>
@@ -336,6 +440,62 @@ export default function PortPanel({ device, items, loading, onClose }) {
                 <div>
                   <dt>Tipo de enlace</dt>
                   <dd>{selected.es_trunk ? "Troncal (trunk)" : "Acceso"}</dd>
+                </div>
+                <div>
+                  <dt>Vecino (CDP/LLDP)</dt>
+                  <dd>
+                    {selected.vecino_nombre ? (
+                      <>
+                        <strong>{selected.vecino_nombre}</strong>
+                        {selected.vecino_puerto && ` · ${selected.vecino_puerto}`}
+                        {selected.vecino_tipo && (
+                          <small className="detail-note"><NeighborTypeLabel kind={selected.vecino_tipo} /></small>
+                        )}
+                        <small className="detail-note">
+                          {[selected.vecino_plataforma, selected.vecino_ip].filter(Boolean).join(" · ")}
+                        </small>
+                      </>
+                    ) : (
+                      "Sin vecino CDP/LLDP"
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Velocidad y uso</dt>
+                  <dd>
+                    {formatSpeed(selected.velocidad_mbps) || "Sin lectura"}
+                    {selected.uso_pct != null && (
+                      <span className={selected.uso_pct >= 90 ? "status-critical-text" : selected.uso_pct >= 70 ? "status-warning-text" : ""}>
+                        {` · ${selected.uso_pct.toFixed(1)}% de uso`}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Último cambio de estado</dt>
+                  <dd>
+                    {selected.ultimo_cambio ? timeAgo(selected.ultimo_cambio) : "Sin lectura"}
+                    {selected.estado_operativo !== "up" && selected.ultimo_activo && (
+                      <small className="detail-note">Sin enlace desde {new Date(selected.ultimo_activo).toLocaleString()}</small>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>PoE</dt>
+                  <dd>
+                    {selected.poe_estado ? (
+                      <>
+                        {/fault/i.test(selected.poe_estado) ? (
+                          <span className="status-critical-text">{POE_TEXT[selected.poe_estado]}</span>
+                        ) : (
+                          POE_TEXT[selected.poe_estado] || selected.poe_estado
+                        )}
+                        {selected.poe_mw != null && ` · ${(selected.poe_mw / 1000).toFixed(1)} W`}
+                      </>
+                    ) : (
+                      "No publicado"
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt>Estado</dt>
@@ -421,7 +581,12 @@ export default function PortPanel({ device, items, loading, onClose }) {
                     ) : (
                       <p className="traffic-pending">Esperando la siguiente lectura para graficar el consumo…</p>
                     )}
-                    {history[selected.id]?.length > 0 && <HistoryChart points={history[selected.id]} />}
+                    {historyLoading === selected.id && !history[selected.id] ? (
+                      <p className="loading-line traffic-pending" role="status">
+                        <i className="spinner" aria-hidden="true" />
+                        Cargando histórico del puerto…
+                      </p>
+                    ) : history[selected.id]?.length > 0 && <HistoryChart points={history[selected.id]} />}
                   </dd>
                 </div>
                 <div className="port-note">

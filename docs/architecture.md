@@ -6,7 +6,7 @@ React (frontend/src/components)
   → /api/ (backend/api/urls.py)
   → vistas + permisos + serializers (backend/api/)
   → modelos Django (planteles, switches, usuarios)
-  → SQLite local
+  → SQLite local (desarrollo) o PostgreSQL (docker-compose)
 
 Worker SNMP → servicios (backend/switches/services.py) → estado actual en Django
             → InfluxWriter → historial en InfluxDB → Grafana
@@ -53,9 +53,15 @@ La API no borra inventario: utiliza activo=false para conservar historial y puer
 | /api/planteles/ | GET, POST | Planteles |
 | /api/switches/ | GET, POST | Inventario |
 | /api/{recurso}/{id}/ | GET, PUT, PATCH | Consultar/editar |
-| /api/switches/{id}/puertos/ | GET | Últimas observaciones |
+| /api/switches/{id}/puertos/ | GET | Últimas observaciones (sólo puertos físicos) |
+| /api/switches/{id}/historial/ | GET | CPU, memoria y tráfico de 24 h |
+| /api/puertos/{id}/historial/ | GET | Octetos del puerto de 24 h |
+| /api/resumen/ | GET | Estado, motivos, puertos e histórico de todos los switches (caché 60 s; `?refresh=1` la renueva) |
+| /api/integrations/zabbix/ | GET | Hosts publicados por Zabbix |
 
-Los endpoints de listado retornan arreglos JSON. Las métricas de Switch son de solo
+Los endpoints de listado retornan arreglos JSON; con `?page=N` (y `page_size`)
+devuelven una página `{count, next, previous, results}`.
+Tras 5 intentos de login fallidos por usuario e IP, el login responde 429 durante 15 min. Las métricas de Switch son de solo
 lectura para la API. Los puertos solo se escriben por el servicio del worker.
 Errores de validación: 400. Sin sesión o permiso: 403. Login inválido: 401.
 
