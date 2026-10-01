@@ -3,7 +3,7 @@ from django.db import connections, close_old_connections
 
 _lock = threading.Lock()
 
-def record_poll(dispositivo, datos):
+def record_poll(dispositivo, datos, verificacion=None):
     if 'django_id' not in dispositivo:
         return
     from switches.services import record_poll as save
@@ -11,7 +11,7 @@ def record_poll(dispositivo, datos):
     with _lock:
         close_old_connections()
         try:
-            save(dispositivo['django_id'], dispositivo['hostname'], datos)
+            save(dispositivo['django_id'], dispositivo['hostname'], datos, verificacion)
         finally:
             connections.close_all()
 

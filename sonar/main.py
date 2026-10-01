@@ -14,6 +14,7 @@ from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNM
 from sonar.database.influx_writer import InfluxWriter
 from sonar.database.django_store import mark_worker_started, notify_alerts, record_poll, worker_heartbeat
 from sonar.collector.snmp_collector import obtener_datos_reales
+from sonar.collector.icmp import ping
 from sonar.discovery import Scheduler as DiscoveryScheduler
 from sonar.database.django_store import BackupScheduler
 
@@ -58,7 +59,11 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
     try:
         datos = await obtener_datos_reales(dispositivo)
 
-        await asyncio.to_thread(record_poll, dispositivo, datos)
+        # Validación en capas: si SNMP no responde, un ping dice si el equipo sigue encendido.
+        verificacion = None
+        if not datos and 'django_id' in dispositivo:
+            verificacion = dict(icmp=await ping(dispositivo['hostname']))
+        await asyncio.to_thread(record_poll, dispositivo, datos, verificacion)
         await asyncio.to_thread(notify_alerts, dispositivo)
 
         if not datos:

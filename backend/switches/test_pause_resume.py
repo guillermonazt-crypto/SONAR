@@ -107,7 +107,8 @@ class PauseResumeTests(TestCase):
         # Antes de apagar SONAR el switch estaba caído y se avisó.
         self.poll(self.t0)
         self.poll(self.t0 + timedelta(minutes=1), False)
-        self.assertIn('en riesgo', alerts.evaluate(self.switch.pk, self.t0 + timedelta(minutes=1)))
+        self.poll(self.t0 + timedelta(minutes=2), False)
+        self.assertIn('en riesgo', alerts.evaluate(self.switch.pk, self.t0 + timedelta(minutes=2)))
         # Se reabre 2 días después: durante la gracia no se cierra ni se re-notifica.
         start = self.t0 + timedelta(days=2)
         mark_worker_started(start)
@@ -128,7 +129,8 @@ class PauseResumeTests(TestCase):
     def test_recovery_after_restart_closes_episode(self):
         self.poll(self.t0)
         self.poll(self.t0 + timedelta(minutes=1), False)
-        alerts.evaluate(self.switch.pk, self.t0 + timedelta(minutes=1))
+        self.poll(self.t0 + timedelta(minutes=2), False)
+        alerts.evaluate(self.switch.pk, self.t0 + timedelta(minutes=2))
         start = self.t0 + timedelta(days=1)
         mark_worker_started(start)
         self.poll(start + timedelta(seconds=30))

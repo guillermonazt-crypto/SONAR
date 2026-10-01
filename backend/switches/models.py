@@ -54,6 +54,11 @@ class Switch(models.Model):
     # PoE (POWER-ETHERNET-MIB): presupuesto y consumo del switch en watts.
     poe_presupuesto_w = models.FloatField(null=True, blank=True)
     poe_consumo_w = models.FloatField(null=True, blank=True)
+    # Validación en capas: sondeos SNMP fallidos seguidos y resultado del último
+    # intento por método {snmp, icmp, vecinos: True responde | False falla | None sin dato}.
+    fallos_consecutivos = models.PositiveIntegerField(default=0)
+    metodos_fallidos = models.JSONField(default=list, blank=True)
+    verificacion = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Switch"

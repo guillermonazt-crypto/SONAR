@@ -99,7 +99,7 @@ def _reason(level, kind, text):
 # Motivos guardados antes de que existiera 'tipo' (alertas antiguas): se deduce del texto.
 LEGACY_REASON_TYPES = (
     ('No responde', 'snmp'), ('Aún no se ha consultado', 'lectura'), ('Última lectura', 'lectura'),
-    ('Sin lectura', 'lectura'), ('Iniciando', 'iniciando'),
+    ('Sin lectura', 'lectura'), ('Iniciando', 'iniciando'), ('se confirma en el siguiente', 'verificando'),
     ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
     ('errores nuevos', 'errores'), ('dañados', 'errores'), ('inestables', 'inestables'),
     ('capacidad', 'saturacion'), ('Óptica SFP', 'optica'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
@@ -138,22 +138,49 @@ def in_grace(started, now):
     return started is not None and timedelta(0) <= now - started < timedelta(minutes=GRACE_MINUTES)
 
 
+# Sondeos SNMP fallidos seguidos antes de cambiar el estado (igual que services.CONFIRM_FAILURES).
+CONFIRM_FAILURES = 2
+METHOD_LABEL = {'snmp': 'SNMP', 'icmp': 'ping', 'vecinos': 'vecinos LLDP/CDP'}
+
+
+def _alive_by(switch):
+    """Métodos distintos de SNMP que confirman que el equipo sigue encendido."""
+    checks = switch.verificacion or {}
+    return [METHOD_LABEL[m] for m in ('icmp', 'vecinos') if checks.get(m) is True]
+
+
 def connection_state(switch, started, now):
     """('activo' | 'iniciando' | 'inactivo', motivo o None) de la lectura SNMP de un switch.
 
-    - activo: el último sondeo fue exitoso y ocurrió hace menos de STALE_MINUTES.
+    - activo: el último sondeo fue exitoso y ocurrió hace menos de STALE_MINUTES,
+      o falló un solo sondeo (se confirma en el siguiente: sin flip en un sondeo).
     - iniciando: aún no se consulta, o el worker arrancó hace menos de
       GRACE_MINUTES (`started`) y su primer sondeo no ha dado lectura.
-    - inactivo: el sondeo falló o no hay lectura exitosa reciente.
+    - inactivo: CONFIRM_FAILURES sondeos fallidos seguidos o sin lectura exitosa
+      reciente. Es rojo sólo si ningún otro método (ping, vecinos LLDP/CDP)
+      confirma que el equipo sigue encendido; si alguno lo confirma, amarillo.
     """
     ok_at = last_success(switch)
     fresh = ok_at is not None and now - ok_at < timedelta(minutes=STALE_MINUTES)
     if switch.lectura_correcta is not False and fresh:
         return 'activo', None
-    if switch.ultima_consulta is None or in_grace(started, now):
+    failures = switch.fallos_consecutivos
+    # 0 = registro anterior a la validación en capas: su estado ya estaba confirmado.
+    pending = switch.lectura_correcta is False and 0 < failures < CONFIRM_FAILURES
+    if pending and fresh:
+        return 'activo', _reason('ok', 'verificando',
+                                 f'Sin respuesta SNMP en el último sondeo; se confirma en el siguiente '
+                                 f'({failures}/{CONFIRM_FAILURES})')
+    if switch.ultima_consulta is None or in_grace(started, now) or (pending and ok_at is None):
         return 'iniciando', _reason('warning', 'iniciando', 'Iniciando monitoreo…')
     if switch.lectura_correcta is False:
-        return 'inactivo', _reason('critical', 'snmp', 'No responde a SNMP')
+        alive = _alive_by(switch)
+        if alive:
+            return 'inactivo', _reason('warning', 'snmp',
+                                       f"No responde a SNMP, pero sí a {' y '.join(alive)}: equipo encendido, revisar SNMP")
+        failed = [METHOD_LABEL[m] for m in switch.metodos_fallidos or ['snmp']]
+        detail = f" ({', '.join(failed)}; {failures} sondeos seguidos)" if len(failed) > 1 else ''
+        return 'inactivo', _reason('critical', 'snmp', f'No responde a SNMP{detail}')
     if ok_at is None:
         return 'inactivo', _reason('critical', 'lectura', 'Sin lecturas exitosas')
     minutes = (now - ok_at).total_seconds() / 60
@@ -171,6 +198,8 @@ def assess(switch, stats, thresholds, now=None, started=None):
         return 'ok', [_reason('ok', 'inventario', 'Equipo desactivado en inventario')]
     state, reason = connection_state(switch, started, now)
     level = {'activo': 'ok', 'iniciando': 'warning', 'inactivo': 'critical'}[state]
+    if state == 'inactivo':
+        level = reason['level']
     if reason:
         reasons.append(reason)
     level = _worst(level, _metric(switch.cpu_5m, thresholds['cpu_atencion'], thresholds['cpu_riesgo'], 'CPU', 'cpu', reasons))

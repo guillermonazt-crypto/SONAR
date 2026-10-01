@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from .interfaces import is_physical_interface
 from .optics import update_baseline
@@ -121,8 +122,37 @@ def worker_heartbeat(now=None):
     EstadoMonitoreo.objects.update_or_create(pk=1, defaults=dict(latido=now))
 
 
+# Sondeos SNMP fallidos seguidos antes de considerar caído un switch (sin flip en un solo sondeo).
+CONFIRM_FAILURES = 2
+# Un vecino sólo cuenta como indicio si su propia lectura es reciente.
+NEIGHBOR_FRESH = timedelta(minutes=5)
+
+
+def neighbor_view(switch, now):
+    """¿Los vecinos LLDP/CDP ven el enlace hacia este switch?
+
+    True si algún switch vecino con lectura reciente tiene arriba el puerto que
+    lo apunta, False si todos esos puertos están abajo, None si nadie lo ve.
+    """
+    ports = (Puerto.objects.filter(Q(vecino_ip=switch.hostname) | Q(vecino_nombre__iexact=switch.nombre))
+             .exclude(switch=switch)
+             .filter(switch__lectura_correcta=True, switch__ultima_lectura_exitosa__gte=now - NEIGHBOR_FRESH)
+             .values_list('estado_operativo', flat=True))
+    states = [state for state in ports if state in LINK_STATES]
+    if not states:
+        return None
+    return 'up' in states
+
+
+def verify_failure(switch, verificacion, now):
+    """Resultado por método tras un sondeo SNMP fallido y lista de métodos que fallaron."""
+    result = dict(snmp=False, icmp=(verificacion or {}).get('icmp'), vecinos=neighbor_view(switch, now))
+    return result, [method for method in ('snmp', 'icmp', 'vecinos') if result[method] is False]
+
+
 @transaction.atomic
-def record_poll(switch_id, hostname, datos):
+def record_poll(switch_id, hostname, datos, verificacion=None):
+    """Guarda un sondeo. `verificacion` trae los métodos extra del worker ({icmp: bool|None})."""
     # Revalidar inventario: pudo cambiar mientras la consulta estaba en vuelo.
     switch = Switch.objects.filter(pk=switch_id, hostname=hostname, activo=True, plantel__activo=True).first()
     if switch is None:
@@ -134,8 +164,14 @@ def record_poll(switch_id, hostname, datos):
     resumed = elapsed is None or elapsed > MAX_POLL_GAP.total_seconds()
     current_uptime = datos.get('uptime_segundos') if datos else None
     reboot_detected = detect_reboot(switch.uptime_segundos, current_uptime, elapsed)
+    if datos is None:
+        checks, failed = verify_failure(switch, verificacion, now)
+        layered = dict(fallos_consecutivos=switch.fallos_consecutivos + 1, metodos_fallidos=failed,
+                       verificacion=dict(checks, momento=now.isoformat()))
+    else:
+        layered = dict(fallos_consecutivos=0, metodos_fallidos=[], verificacion=None)
     Switch.objects.filter(pk=switch.pk).update(
-        ultima_consulta=now, lectura_correcta=datos is not None,
+        ultima_consulta=now, lectura_correcta=datos is not None, **layered,
         **({'ultima_lectura_exitosa': now} if datos else {}),
         **{field: datos.get(field) if datos else None for field in (
             'cpu_5s','cpu_1m','cpu_5m','memoria_usada_pct','memoria_total_bytes',

@@ -25,6 +25,8 @@ class SiteDashboardTests(TestCase):
         record_poll(self.ok.pk, self.ok.hostname, dict(cpu_5m=10, interfaces=[
             dict(indice=1, nombre='GigabitEthernet1/0/1', estado='up'),
             dict(indice=2, nombre='GigabitEthernet1/0/2', estado='down')]))
+        # Dos sondeos fallidos seguidos: la validación en capas confirma la caída.
+        record_poll(self.down.pk, self.down.hostname, None)
         record_poll(self.down.pk, self.down.hostname, None)
         record_poll(self.warm.pk, self.warm.hostname, dict(cpu_5m=75, interfaces=[]))
         self.alert = Alerta.objects.create(switch=self.down, inicio=timezone.now(),
