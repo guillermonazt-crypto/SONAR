@@ -7,6 +7,7 @@ import SonarDataTable from "./DataTable";
 import LineChart from "./LineChart";
 import TopologyMap from "./TopologyMap";
 import { useViewState } from "../utils/viewState";
+import "./contextual.css";
 
 // [tipo, etiqueta, parámetro opcional {clave, etiqueta, valor, opciones}]
 const REPORTS = [
@@ -31,6 +32,20 @@ const GROUPS = [
   ["Históricos", ["tendencias"]],
 ];
 const LEVEL_TEXT = { ok: "Normal", warning: "Atención", critical: "En riesgo" };
+// Reportes por excepción (el backend manda `rango`): qué fila está fuera de rango.
+// Los de puertos ya llegan filtrados: toda fila es un problema.
+const OUT_OF_RANGE = {
+  opticas: (row) => row.nivel !== "ok",
+  hardware: (row) => row.estado !== "ok",
+  disponibilidad: (row) => row.minutos_caido > 0,
+};
+
+/** Filas fuera de rango y cuántos elementos sanos quedan ocultos. */
+export function splitByRange(kind, rows, range) {
+  if (!range) return { flagged: rows, healthy: 0 };
+  const flagged = rows.filter(OUT_OF_RANGE[kind] || (() => true));
+  return { flagged, healthy: Math.max(0, range.total - flagged.length) };
+}
 
 function cell(key, value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -127,6 +142,8 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
   // Al cambiar de reporte no se muestran columnas del anterior.
   const shown = data?.kind === kind ? data : null;
   const rows = useMemo(() => (data?.filas || []).map((row, index) => ({ ...row, _key: index })), [data]);
+  const range = data?.rango;
+  const { flagged, healthy } = useMemo(() => splitByRange(data?.kind, rows, range), [data, rows, range]);
   const columns = (data?.columnas || []).map((column) => ({
     name: column.titulo,
     sortable: true,
@@ -228,16 +245,25 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
             {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} />}
-            <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"}</p>
-            <div className="table-scroll sonar-table">
-              <SonarDataTable
-                columns={columns}
-                data={rows}
-                keyField="_key"
-                pagination={!printing}
-                noDataComponent="Sin datos para este reporte."
-              />
-            </div>
+            {range && !flagged.length ? (
+              <p className="report-healthy" role="status">✓ {healthy} {range.etiqueta}</p>
+            ) : (
+              <>
+                <p className="report-count">
+                  {range ? `${flagged.length} fuera de rango` : `${data.filas.length} fila${data.filas.length === 1 ? "" : "s"}`}
+                </p>
+                {range && healthy > 0 && <p className="report-healthy-note">✓ {healthy} {range.etiqueta} (no se muestran)</p>}
+                <div className="table-scroll sonar-table">
+                  <SonarDataTable
+                    columns={columns}
+                    data={flagged}
+                    keyField="_key"
+                    pagination={!printing}
+                    noDataComponent="Sin datos para este reporte."
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>

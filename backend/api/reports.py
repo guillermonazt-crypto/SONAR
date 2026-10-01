@@ -390,8 +390,31 @@ REPORTS = {
 }
 
 
+def _physical_ports(params, report):
+    return _ports(params).filter(es_fisico=True, switch__activo=True).count()
+
+
+def _rows(params, report):
+    return len(report['filas'])
+
+
+# Reportes por excepción: la pantalla muestra sólo lo fuera de rango y, si todo
+# está bien, "✓ N <etiqueta>". total = elementos evaluados (sanos + fuera de rango).
+RANGE_REPORTS = {
+    'puertos-errores': (_physical_ports, 'puertos sanos'),
+    'puertos-inestables': (_physical_ports, 'puertos sanos'),
+    'puertos-saturados': (_physical_ports, 'puertos sanos'),
+    'opticas': (_rows, 'ópticas en rango'),
+    'hardware': (_rows, 'componentes sanos'),
+    'disponibilidad': (_rows, 'switches sin caídas'),
+}
+
+
 def build(kind, params, now=None):
     report = REPORTS[kind](params, now or timezone.now())
     report['columnas'] = [dict(clave=key, titulo=title) for key, title in report['columnas']]
     report['tipo'] = kind
+    if kind in RANGE_REPORTS:
+        total, label = RANGE_REPORTS[kind]
+        report['rango'] = dict(total=total(params, report), etiqueta=label)
     return report

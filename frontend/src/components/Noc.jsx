@@ -5,7 +5,9 @@ import { siteCoordinates } from "../utils/locations";
 import { setRefreshInterval, useAutoRefresh } from "../utils/refresh";
 import { timeAgo } from "../utils/format";
 import { useTheme } from "../utils/theme";
+import { useViewState } from "../utils/viewState";
 import { StartingNotice, isOnline } from "./Status";
+import "./contextual.css";
 
 // Leaflet sólo se descarga en el NOC.
 const NocMap = lazy(() => import("./NocMap"));
@@ -24,6 +26,25 @@ function Kpi({ label, value, detail, tone = "" }) {
   );
 }
 
+/** Métrica única de arranque: disponibilidad global; un clic abre el detalle. */
+function AvailabilityHero({ availability, online, total, critical, pending, onOpen }) {
+  const tone = availability === null ? "" : availability < 80 ? "critical" : availability < 95 ? "warning" : "ok";
+  const context = [
+    total ? `${online}/${total} switches responden` : "sin switches activos",
+    critical ? `${critical} plantel${critical === 1 ? "" : "es"} en rojo` : null,
+    pending ? `${pending} alerta${pending === 1 ? "" : "s"} sin reconocer` : null,
+  ].filter(Boolean).join(" · ");
+  return (
+    <button type="button" className={`noc-hero${tone ? ` tone-${tone}` : ""}`} onClick={onOpen}
+      aria-label={`Disponibilidad global ${availability === null ? "sin datos" : `${availability}%`}. Ver detalle por plantel`}>
+      <span className="noc-hero-label">Disponibilidad global</span>
+      <strong className="noc-hero-value">{availability === null ? "—" : `${availability}%`}</strong>
+      <small>{context}</small>
+      <span className="noc-hero-more">Ver detalle por plantel →</span>
+    </button>
+  );
+}
+
 /** Planteles que pasaron a crítico desde la lectura anterior (no en la primera). */
 export function newlyCritical(previous, sites) {
   if (!previous) return [];
@@ -36,6 +57,9 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [incidents, setIncidents] = useState([]);
+  // Dashboard contextual: arranca en la métrica global y se profundiza por clic
+  // (se recuerda al volver de un plantel).
+  const [detail, setDetail] = useViewState("noc-detail", false);
   const previous = useRef(null);
   const soundRef = useRef(sound);
   soundRef.current = sound;
@@ -139,53 +163,60 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
         </div>
       )}
 
-      <div className="noc-kpis">
-        <Kpi label="Disponibilidad" value={availability === null ? "—" : `${availability}%`} detail="switches que responden a SNMP" tone={availability !== null && availability < 95 ? (availability < 80 ? "critical" : "warning") : ""} />
-        <Kpi label="Switches en línea" value={`${online}/${devices.length}`} detail={devices.length - online ? `${devices.length - online} sin respuesta` : "todos responden"} />
-        <Kpi label="Alertas abiertas" value={openAlerts} detail={pending ? `${pending} sin reconocer` : "todas atendidas"} tone={pending ? "critical" : ""} />
-        <article className="noc-kpi">
-          <span>Planteles</span>
-          <div className="noc-levels">
-            <span className="level-count"><i className="dot dot-critical" />{count("critical")}</span>
-            <span className="level-count"><i className="dot dot-warning" />{count("warning")}</span>
-            <span className="level-count"><i className="dot dot-ok" />{count("ok")}</span>
+      {!detail ? (
+        <AvailabilityHero availability={availability} online={online} total={devices.length} critical={critical.length} pending={pending} onOpen={() => setDetail(true)} />
+      ) : (
+        <>
+          <button type="button" className="back-button" onClick={() => setDetail(false)}>← Disponibilidad global</button>
+          <div className="noc-kpis">
+            <Kpi label="Disponibilidad" value={availability === null ? "—" : `${availability}%`} detail="switches que responden a SNMP" tone={availability !== null && availability < 95 ? (availability < 80 ? "critical" : "warning") : ""} />
+            <Kpi label="Switches en línea" value={`${online}/${devices.length}`} detail={devices.length - online ? `${devices.length - online} sin respuesta` : "todos responden"} />
+            <Kpi label="Alertas abiertas" value={openAlerts} detail={pending ? `${pending} sin reconocer` : "todas atendidas"} tone={pending ? "critical" : ""} />
+            <article className="noc-kpi">
+              <span>Planteles</span>
+              <div className="noc-levels">
+                <span className="level-count"><i className="dot dot-critical" />{count("critical")}</span>
+                <span className="level-count"><i className="dot dot-warning" />{count("warning")}</span>
+                <span className="level-count"><i className="dot dot-ok" />{count("ok")}</span>
+              </div>
+              <small>crítico · atención · sano</small>
+            </article>
           </div>
-          <small>crítico · atención · sano</small>
-        </article>
-      </div>
 
-      <div className="noc-body">
-        <section className="panel noc-map-panel">
-          <Suspense fallback={<div className="noc-map skeleton" aria-hidden="true" />}>
-            <NocMap points={points} theme={theme} onSelect={onOpenSite} />
-          </Suspense>
-          <div className="noc-legend">
-            {["critical", "warning", "ok", "none"].map((level) => (
-              <span key={level}><i className={`dot dot-${level}`} />{LEVEL_TEXT[level]}</span>
-            ))}
+          <div className="noc-body">
+            <section className="panel noc-map-panel">
+              <Suspense fallback={<div className="noc-map skeleton" aria-hidden="true" />}>
+                <NocMap points={points} theme={theme} onSelect={onOpenSite} />
+              </Suspense>
+              <div className="noc-legend">
+                {["critical", "warning", "ok", "none"].map((level) => (
+                  <span key={level}><i className={`dot dot-${level}`} />{LEVEL_TEXT[level]}</span>
+                ))}
+              </div>
+            </section>
+            <section className="panel noc-sites" aria-label="Planteles por estado">
+              <h2 className="panel-title">{critical.length ? `${critical.length} en rojo` : "Planteles"}</h2>
+              {!summary ? (
+                <p className="muted">Cargando…</p>
+              ) : (
+                <ul className="noc-site-list">
+                  {ordered.map((site) => (
+                    <li key={site.id}>
+                      <button type="button" className={`noc-site site-${site.estado}`} onClick={() => onOpenSite(site.id)} aria-label={`${site.nombre}: ${LEVEL_TEXT[site.estado]}`}>
+                        <i className={`dot dot-${site.estado}`} aria-hidden="true" />
+                        <span className="noc-site-name">{site.nombre}</span>
+                        <span className="noc-site-meta">
+                          {site.alertas_abiertas > 0 ? `${site.alertas_abiertas} alerta${site.alertas_abiertas === 1 ? "" : "s"}` : site.equipos ? `${site.disponibilidad}%` : "—"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
-        </section>
-        <section className="panel noc-sites" aria-label="Planteles por estado">
-          <h2 className="panel-title">{critical.length ? `${critical.length} en rojo` : "Planteles"}</h2>
-          {!summary ? (
-            <p className="muted">Cargando…</p>
-          ) : (
-            <ul className="noc-site-list">
-              {ordered.map((site) => (
-                <li key={site.id}>
-                  <button type="button" className={`noc-site site-${site.estado}`} onClick={() => onOpenSite(site.id)} aria-label={`${site.nombre}: ${LEVEL_TEXT[site.estado]}`}>
-                    <i className={`dot dot-${site.estado}`} aria-hidden="true" />
-                    <span className="noc-site-name">{site.nombre}</span>
-                    <span className="noc-site-meta">
-                      {site.alertas_abiertas > 0 ? `${site.alertas_abiertas} alerta${site.alertas_abiertas === 1 ? "" : "s"}` : site.equipos ? `${site.disponibilidad}%` : "—"}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+        </>
+      )}
     </div>
   );
 }

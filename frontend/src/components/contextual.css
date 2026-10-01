@@ -1,0 +1,65 @@
+/* Dashboards contextuales: métrica única de arranque, detalle por clic y reportes por excepción. */
+.noc-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 32px 28px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.noc-hero:hover { border-color: var(--accent-line); }
+.noc-hero:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 2px; }
+.noc-hero-label { color: var(--muted); font-size: 14px; font-weight: 500; }
+.noc-hero-value { font-size: clamp(56px, 12vw, 96px); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
+.noc-hero small { color: var(--muted); font-size: 14px; }
+.noc-hero-more { margin-top: 10px; color: var(--accent); font-size: 14px; font-weight: 500; }
+.noc-hero.tone-ok .noc-hero-value { color: var(--ok); }
+.noc-hero.tone-warning .noc-hero-value { color: var(--warning); }
+.noc-hero.tone-critical .noc-hero-value { color: var(--critical); }
+:root[data-theme="light"] .noc-hero { border-color: transparent; box-shadow: 0 1px 2px #1f27330d, 0 6px 18px #1f27330a; }
+
+.back-button {
+  align-self: flex-start;
+  margin: 4px 0 12px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.back-button:hover { text-decoration: underline; }
+
+.report-healthy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  color: var(--ok);
+  font-weight: 500;
+}
+.report-healthy-note { margin: 4px 0 8px; color: var(--muted); font-size: 13px; }
+
+.worker-offline {
+  border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent);
+  background: color-mix(in srgb, var(--critical) 10%, transparent);
+  color: var(--critical);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 0 0 12px;
+  font-weight: 500;
+}
