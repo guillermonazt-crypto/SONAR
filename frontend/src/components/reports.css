@@ -1,0 +1,232 @@
+/* Reportes: resúmenes gráficos, leyenda de niveles y tarjetas de equipos.
+   Rojo = problema, amarillo = advertencia, gris = información, verde = normal. */
+
+.report-mark {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  vertical-align: middle;
+  font-style: normal;
+}
+.report-mark.shape-circle { border-radius: 50%; background: currentColor; }
+.report-mark.shape-ring { border-radius: 50%; border: 2px solid currentColor; }
+.report-mark.shape-triangle {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid currentColor;
+}
+.mark-critical { color: var(--critical); }
+.mark-warning { color: var(--warning); }
+.mark-info { color: var(--muted-2); }
+.mark-ok { color: var(--ok); }
+.status-badge .report-mark { margin-right: 0; }
+
+.report-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.report-legend > span { display: inline-flex; align-items: center; }
+
+.report-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  margin: 8px 0 20px;
+}
+.report-summary.vertical { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+
+.report-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 4px 0 16px;
+}
+.report-summary .report-kpis { margin: 0; }
+.report-kpi {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  min-width: 0;
+}
+.report-kpi > span { display: flex; align-items: center; color: var(--muted); font-size: 12px; font-weight: 500; }
+.report-kpi strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.report-kpi small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-kpi.tone-critical strong { color: var(--critical); }
+.report-kpi.tone-warning strong { color: var(--warning); }
+
+.report-donut { margin: 0; display: flex; align-items: center; gap: 16px; }
+.report-donut-canvas { position: relative; width: 132px; height: 132px; }
+.report-donut-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.report-donut figcaption { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.report-donut figcaption span { display: flex; align-items: center; gap: 8px; }
+.report-donut figcaption i { width: 9px; height: 9px; border-radius: 50%; }
+.report-donut figcaption b { margin-left: auto; padding-left: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.report-figure { margin: 0; display: grid; gap: 12px; }
+.report-figure > figcaption { font-size: 13px; font-weight: 600; color: var(--text-2); }
+
+.report-bars { display: grid; gap: 8px; }
+.report-bar {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.report-bar-label { display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-bar b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.report-bar-track {
+  position: relative;
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.report-bar-track > i { display: block; height: 100%; border-radius: inherit; }
+.fill-ok { background: var(--ok); }
+.fill-warning { background: var(--warning); }
+.fill-critical { background: var(--critical); }
+.fill-info { background: var(--muted-2); }
+.report-scale-note { font-size: 11px; color: var(--muted-2); }
+
+/* Ópticas */
+.optic-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.optic-group {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.optic-group h3 { margin: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optic-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 96px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+.optic-port { display: flex; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.optic-track { overflow: visible; }
+.optic-threshold {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 0;
+  border-left: 1px dashed var(--critical);
+}
+.optic-values { display: grid; text-align: right; font-variant-numeric: tabular-nums; }
+.optic-values small { color: var(--muted-2); font-size: 11px; }
+
+/* APs y teléfonos */
+.device-filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-bottom: 14px; }
+.device-filters input[type="search"] { flex: 1 1 260px; max-width: 360px; }
+.device-filters .report-legend { margin-left: auto; }
+.device-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.device-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  min-width: 0;
+}
+.device-card header { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.device-card header .report-mark { margin-top: 5px; }
+.device-card header div { min-width: 0; }
+.device-card header strong { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-card header small { color: var(--muted); font-size: 12px; }
+.device-card dl { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.device-card dt { font-size: 11px; color: var(--muted-2); }
+.device-card dd { margin: 2px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+}
+.device-card footer small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-card.kind-ap { border-left: 3px solid var(--topo-ap); }
+.device-card.kind-telefono { border-left: 3px solid var(--topo-phone); }
+.device-more { margin-top: 14px; }
+
+/* Tipo de equipo vecino y mapa: marca de color en lugar de ícono. */
+.neighbor-dot, .topology-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--topo-switch);
+}
+.neighbor-ap .neighbor-dot, .topology-kind-ap .topology-legend-dot { background: var(--topo-ap); }
+.neighbor-telefono .neighbor-dot, .topology-kind-telefono .topology-legend-dot { background: var(--topo-phone); }
+.topology-icon { font-size: 8px; font-weight: 700; letter-spacing: 0.02em; }
+.topology-icon.small { font-size: 5.5px; }
+.topology-detail-icon { font-size: 11px; font-weight: 700; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .report-summary { grid-template-columns: minmax(0, 1fr); }
+  .report-donut { justify-content: flex-start; }
+  .report-bar { grid-template-columns: minmax(0, 1fr) 64px; }
+  .report-bar-track { grid-column: 1 / -1; grid-row: 2; }
+  .optic-groups { grid-template-columns: minmax(0, 1fr); }
+  .optic-row { grid-template-columns: 80px minmax(0, 1fr) 84px; }
+  .device-filters .report-legend { margin-left: 0; }
+}
+
+@media print {
+  .report-kpi, .optic-group, .device-card { break-inside: avoid; }
+  .device-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

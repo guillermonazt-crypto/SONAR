@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { useViewState } from "../utils/viewState";
 
-// Ícono y color de cada nodo del mapa. Lo que no es AP ni teléfono se dibuja como switch.
+// Abreviatura y color de cada nodo del mapa (sin emojis). Lo que no es AP ni teléfono se dibuja como switch.
 const KINDS = {
-  switch: { icon: "🖥", label: "Switch / enlace" },
-  ap: { icon: "📶", label: "Access point" },
-  telefono: { icon: "☎", label: "Teléfono IP" },
+  switch: { icon: "SW", label: "Switch / enlace" },
+  ap: { icon: "AP", label: "Access point" },
+  telefono: { icon: "TEL", label: "Teléfono IP" },
 };
 const LEAF_KINDS = ["ap", "telefono"];
 // Uso del puerto que colorea el enlace (igual que el reporte de puertos saturados).
@@ -168,7 +168,7 @@ export default function TopologyMap({ rows: allRows, onOpenPort = () => {} }) {
         <div className="topology-legend" aria-label="Leyenda del mapa">
           {Object.entries(KINDS).map(([kind, info]) => (
             <span key={kind} className={`topology-legend-item topology-kind-${kind}`}>
-              <i aria-hidden="true">{info.icon}</i> {info.label}
+              <i className="topology-legend-dot" aria-hidden="true" /> {info.label}
             </span>
           ))}
           <span className="topology-legend-item"><i className="topology-legend-line saturated" aria-hidden="true" /> Enlace saturado (≥ {SATURATED} %)</span>

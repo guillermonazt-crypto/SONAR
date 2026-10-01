@@ -254,6 +254,7 @@ class ApiTests(TestCase):
         self.assertEqual((endpoints['Te1/1/2']['tipo_equipo'], endpoints['Te1/1/2']['poe_w']), ('Access point', 15.4))
         self.assertEqual((endpoints['Gi1/0/3']['vecino_tipo'], endpoints['Gi1/0/3']['vlan']), ('telefono', 110))
         self.assertEqual(endpoints['Gi1/0/4']['vecino'], '00:11:22:33:44:66')
+        self.assertIn('enlace', endpoints['Te1/1/2'])
         self.assertEqual([r['puerto'] for r in get('aps-telefonos', equipo='ap')['filas']], ['Te1/1/2'])
         csv = self.client.get('/api/reportes/puertos-sin-uso/', dict(formato='csv'))
         self.assertIn('attachment; filename="sonar-puertos-sin-uso-', csv['Content-Disposition'])

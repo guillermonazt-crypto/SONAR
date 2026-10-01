@@ -19,7 +19,7 @@ describe("Reports", () => {
     const onOpenPort = vi.fn();
     render(<Reports onOpenPort={onOpenPort} />);
     expect(await screen.findByText("SW-CORE")).toBeInTheDocument();
-    expect(screen.getByText("En riesgo")).toHaveClass("status-critical");
+    expect(within(document.querySelector(".sonar-table")).getByText("En riesgo")).toHaveClass("status-critical");
     fireEvent.click(screen.getByRole("button", { name: "Puertos sin uso" }));
     expect(await screen.findByText("Gi1/0/7")).toBeInTheDocument();
     expect(api.report).toHaveBeenLastCalledWith("puertos-sin-uso", "?dias=30");
@@ -53,10 +53,10 @@ describe("Reports", () => {
     fireEvent.click(screen.getByRole("button", { name: "Topología" }));
     const map = await screen.findByRole("img", { name: "Mapa de enlaces CDP" });
     expect(map.querySelectorAll("circle")).toHaveLength(3);
-    expect(map.querySelector("[data-kind='ap']")).toHaveTextContent("📶");
-    expect(map.querySelector("[data-kind='telefono']")).toHaveTextContent("☎");
-    expect(document.querySelector(".neighbor-ap")).toHaveTextContent("📶 Access point");
-    expect(document.querySelector(".neighbor-telefono")).toHaveTextContent("☎ Teléfono IP");
+    expect(map.querySelector("[data-kind='ap']")).toHaveTextContent("AP");
+    expect(map.querySelector("[data-kind='telefono']")).toHaveTextContent("TEL");
+    expect(document.querySelector(".neighbor-ap")).toHaveTextContent(/^s*Access point$/);
+    expect(document.querySelector(".neighbor-telefono .neighbor-dot")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "APs y teléfonos" }));
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("aps-telefonos", "?equipo="));
     fireEvent.change(screen.getByLabelText("Equipo"), { target: { value: "ap" } });
@@ -98,9 +98,11 @@ describe("Reports", () => {
       : report(kind, [], [])));
     const { unmount } = render(<Reports />);
     fireEvent.click(screen.getByRole("button", { name: "Tendencias" }));
-    expect(await screen.findByText("91.5%")).toBeInTheDocument();
+    expect(await within(await screen.findByRole("table")).findByText("91.5%")).toBeInTheDocument();
+    expect(screen.getByText("CPU máxima").closest(".report-kpi")).toHaveClass("tone-critical");
     expect(api.report).toHaveBeenLastCalledWith("tendencias", "?dias=7");
-    expect(screen.getByText("3")).toHaveClass("trend-total");
+    expect(document.querySelector(".trend-total")).toHaveTextContent("3");
+    expect(document.querySelector(".report-kpi")).toHaveTextContent("3");
     expect(screen.getByText(/Día con más alertas/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "30" } });
     expect(await screen.findByText(/InfluxDB no respondió/)).toBeInTheDocument();
@@ -108,5 +110,65 @@ describe("Reports", () => {
     // Al volver se abre el mismo reporte con el mismo periodo.
     render(<Reports />);
     await waitFor(() => expect(api.report).toHaveBeenLastCalledWith("tendencias", "?dias=30"));
+  });
+
+  it("muestra APs y teléfonos como tarjetas con estado, búsqueda y filtro por VLAN", async () => {
+    api.report.mockResolvedValue(report("aps-telefonos", [{ clave: "switch", titulo: "Switch" }], [
+      { switch: "SW-CORE", switch_id: 1, puerto: "Gi1/0/1", puerto_id: 11, vecino: "AP-BIBLIO", vecino_tipo: "ap", tipo_equipo: "Access point", vecino_ip: "10.0.0.5", plataforma: "AIR-AP2802I", vlan: 20, poe_w: 15.4, enlace: "up" },
+      { switch: "SW-CORE", switch_id: 1, puerto: "Gi1/0/2", puerto_id: 12, vecino: "SEP001122334455", vecino_tipo: "telefono", tipo_equipo: "Teléfono IP", vecino_ip: "10.0.1.9", plataforma: "CP-7841", vlan: 110, poe_w: 4.2, enlace: "down" },
+    ]));
+    const onOpenPort = vi.fn();
+    render(<Reports kinds={NETWORK_REPORTS} onOpenPort={onOpenPort} />);
+    fireEvent.click(screen.getByRole("button", { name: "APs y teléfonos" }));
+    const card = (await screen.findByText("AP-BIBLIO")).closest("article");
+    expect(within(card).getByText("AIR-AP2802I")).toBeInTheDocument();
+    expect(within(card).getByText("15.4 W")).toBeInTheDocument();
+    expect(within(card).getByRole("img", { name: "Con enlace" })).toHaveClass("mark-ok");
+    const phone = screen.getByText("SEP001122334455").closest("article");
+    expect(within(phone).getByRole("img", { name: "Sin enlace" })).toHaveClass("mark-critical");
+    expect(document.querySelector(".sonar-table")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Buscar equipo"), { target: { value: "cp-78" } });
+    expect(screen.queryByText("AP-BIBLIO")).not.toBeInTheDocument();
+    expect(screen.getByText("SEP001122334455")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Buscar equipo"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("VLAN"), { target: { value: "20" } });
+    expect(screen.queryByText("SEP001122334455")).not.toBeInTheDocument();
+    // La tarjeta se volvió a montar al limpiar la búsqueda.
+    fireEvent.click(within(screen.getByText("AP-BIBLIO").closest("article")).getByRole("button", { name: "Ver puerto" }));
+    expect(onOpenPort).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), 11);
+  });
+
+  it("marca en rojo las ópticas con RX menor a -24 dBm", async () => {
+    api.report.mockImplementation((kind) => Promise.resolve(kind === "opticas"
+      ? report(kind, [{ clave: "switch", titulo: "Switch" }, { clave: "puerto", titulo: "Interfaz" }], [
+        { switch: "SW-CORE", puerto: "Te1/1/1", rx_dbm: -26.3, tx_dbm: -2.1, nivel: "critical", motivos: "" },
+        { switch: "SW-CORE", puerto: "Te1/1/2", rx_dbm: -8.4, tx_dbm: -2.0, nivel: "ok", motivos: "" },
+      ])
+      : report(kind, [], [])));
+    render(<Reports />);
+    fireEvent.click(screen.getByRole("button", { name: "Ópticas" }));
+    const bad = (await screen.findByText("RX -26.3 dBm")).closest(".optic-row");
+    expect(bad.querySelector(".fill-critical")).toBeInTheDocument();
+    expect(screen.getByText("RX -8.4 dBm").closest(".optic-row").querySelector(".fill-ok")).toBeInTheDocument();
+    expect(screen.getByText("RX bajo -24 dBm").closest(".report-kpi")).toHaveTextContent("1");
+  });
+
+  it("resume la disponibilidad por plantel e indica el estado del inventario", async () => {
+    api.report.mockImplementation((kind) => Promise.resolve(kind === "disponibilidad"
+      ? report(kind, [{ clave: "switch", titulo: "Switch" }], [
+        { switch: "SW-A", plantel: "Actopan", minutos_caido: 600, disponibilidad: 98.6 },
+        { switch: "SW-B", plantel: "Pachuca", minutos_caido: 0, disponibilidad: 100 },
+      ])
+      : report(kind, [{ clave: "switch", titulo: "Switch" }], [
+        { switch: "SW-A", activo: "Sí", estado: "critical", uptime_dias: 3, puertos: 48, activos: 20 },
+        { switch: "SW-B", activo: "Sí", estado: "ok", uptime_dias: 40, puertos: 48, activos: 28 },
+      ])));
+    render(<Reports />);
+    expect(await screen.findByRole("img", { name: "Switches por estado" })).toBeInTheDocument();
+    expect(screen.getByText("48 / 96")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Disponibilidad" }));
+    expect(await screen.findByText("Disponibilidad por plantel")).toBeInTheDocument();
+    expect(document.querySelector(".report-bar[title^='Actopan:'] .fill-critical")).toBeInTheDocument();
+    expect(document.querySelector(".report-bar[title^='Pachuca:'] .fill-ok")).toBeInTheDocument();
   });
 });

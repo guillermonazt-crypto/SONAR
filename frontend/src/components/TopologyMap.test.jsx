@@ -22,9 +22,9 @@ describe("TopologyMap", () => {
     expect(map.querySelectorAll("[data-kind='switch']")).toHaveLength(3);
     expect(map.querySelectorAll("[data-kind='ap']")).toHaveLength(1);
     expect(map.querySelectorAll("[data-kind='telefono']")).toHaveLength(1);
-    expect(map.querySelector("[data-kind='ap']")).toHaveTextContent("📶");
-    expect(map.querySelector("[data-kind='telefono']")).toHaveTextContent("☎");
-    expect(map.querySelector("[data-kind='switch']")).toHaveTextContent("🖥");
+    expect(map.querySelector("[data-kind='ap']")).toHaveTextContent("AP");
+    expect(map.querySelector("[data-kind='telefono']")).toHaveTextContent("TEL");
+    expect(map.querySelector("[data-kind='switch']")).toHaveTextContent("SW");
     expect(map.querySelectorAll("line.saturated")).toHaveLength(1);
     expect(map.querySelectorAll("line.attention")).toHaveLength(1);
     expect(map.querySelectorAll("circle.external")).toHaveLength(1);

@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { api } from "../api/client";
 import { formatRate } from "../utils/format";
-import NeighborTypeLabel from "./NeighborType";
 import SonarDataTable from "./DataTable";
 import LineChart from "./LineChart";
 import TopologyMap from "./TopologyMap";
 import { useViewState } from "../utils/viewState";
+import { AvailabilitySummary, DeviceCards, InventorySummary, KpiTiles, Mark, OpticsBars, TypeLabel } from "./ReportVisuals";
 
 // [tipo, etiqueta, parámetro opcional {clave, etiqueta, valor, opciones}]
 const REPORTS = [
@@ -30,12 +30,14 @@ const GROUPS = [
   ["Energía y fibra", ["poe", "opticas"]],
   ["Históricos", ["tendencias"]],
 ];
+// Reportes con resumen gráfico arriba de la tabla de detalle.
+const VISUAL = ["inventario", "disponibilidad", "opticas", "tendencias"];
 const LEVEL_TEXT = { ok: "Normal", warning: "Atención", critical: "En riesgo" };
 
 function cell(key, value) {
   if (value === null || value === undefined || value === "") return "—";
   if (key === "estado" || key === "nivel") {
-    return LEVEL_TEXT[value] ? <span className={`status-badge status-${value}`}>{LEVEL_TEXT[value]}</span> : value;
+    return LEVEL_TEXT[value] ? <span className={`status-badge status-${value}`}><Mark level={value} title={LEVEL_TEXT[value]} />{LEVEL_TEXT[value]}</span> : value;
   }
   if (key.endsWith("_bps")) return formatRate(value);
   if (key.endsWith("_prom") || key.endsWith("_max")) return `${value}%`;
@@ -48,14 +50,27 @@ const rate = (value) => formatRate(value, { digits: 1, empty: "—" });
 const dayLabel = (day) => new Date(`${day}T12:00:00`).toLocaleDateString("es-MX", { day: "2-digit", month: "short" });
 const USAGE = [["cpu", "CPU prom. %", "accent"], ["memoria", "Memoria prom. %", "violet"]];
 const TRAFFIC = [["entrada_bps", "Entrada", "accent"], ["salida_bps", "Salida", "violet"]];
+const ALERTS = [["alertas", "Alertas nuevas", "critical"]];
+const count = (value) => String(Math.round(value));
+const sum = (rows, key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 
 /** Serie diaria de toda la red: uso, tráfico y alertas nuevas por día. */
-function TrendCharts({ serie }) {
+function TrendCharts({ serie, rows }) {
   const alerts = serie.reduce((sum, day) => sum + day.alertas, 0);
   const worst = serie.reduce((best, day) => (day.alertas > (best?.alertas ?? 0) ? day : best), null);
   const hasUsage = serie.some((day) => Number.isFinite(day.cpu) || Number.isFinite(day.memoria));
   const hasTraffic = serie.some((day) => Number.isFinite(day.entrada_bps) || Number.isFinite(day.salida_bps));
+  const peak = rows.reduce((best, row) => (Number.isFinite(row.cpu_max) && row.cpu_max > (best?.cpu_max ?? -1) ? row : best), null);
+  const reboots = sum(rows, "reinicios");
+  const risk = sum(rows, "minutos_riesgo");
   return (
+    <>
+    <KpiTiles items={[
+      ["Alertas nuevas", alerts, alerts ? "warning" : null, "Episodios abiertos en el periodo"],
+      ["CPU máxima", peak ? `${peak.cpu_max}%` : "—", peak?.cpu_max >= 90 ? "critical" : peak?.cpu_max >= 70 ? "warning" : null, peak ? peak.switch : "Sin lecturas"],
+      ["Reinicios", reboots, reboots ? "warning" : null, "Caídas del uptime detectadas"],
+      ["Minutos en riesgo", risk.toLocaleString("es-MX"), risk ? "critical" : null, "Suma de todos los switches"],
+    ]} />
     <div className="trend-charts">
       <figure>
         <figcaption>CPU y memoria · promedio diario de la red</figcaption>
@@ -73,8 +88,10 @@ function TrendCharts({ serie }) {
         <figcaption>Alertas nuevas</figcaption>
         <strong className="trend-total">{alerts}</strong>
         <small>{worst ? `Día con más alertas: ${dayLabel(worst.dia)} (${worst.alertas})` : "Sin alertas en el periodo"}</small>
+        {alerts > 0 && <LineChart points={serie} series={ALERTS} format={count} xKey="dia" xLabel={dayLabel} label="Alertas nuevas por día" />}
       </figure>
     </div>
+    </>
   );
 }
 
@@ -133,7 +150,7 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
     wrap: true,
     selector: (row) => row[column.clave] ?? "",
     cell: (row) => (column.clave === "tipo_equipo"
-      ? <NeighborTypeLabel kind={row.vecino_tipo} label={row.tipo_equipo} />
+      ? <TypeLabel kind={row.vecino_tipo} label={row.tipo_equipo} />
       : cell(column.clave, row[column.clave])),
   }));
   if (data?.filas?.some((row) => row.puerto_id)) {
@@ -227,17 +244,26 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
           <div className={loading ? "is-stale" : ""}>
             {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
-            {data.serie && <TrendCharts serie={data.serie} />}
-            <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"}</p>
-            <div className="table-scroll sonar-table">
-              <SonarDataTable
-                columns={columns}
-                data={rows}
-                keyField="_key"
-                pagination={!printing}
-                noDataComponent="Sin datos para este reporte."
-              />
-            </div>
+            {data.serie && <TrendCharts serie={data.serie} rows={data.filas} />}
+            {kind === "inventario" && data.filas.length > 0 && <InventorySummary rows={data.filas} />}
+            {kind === "disponibilidad" && <AvailabilitySummary rows={data.filas} />}
+            {kind === "opticas" && <OpticsBars rows={data.filas} />}
+            {kind === "aps-telefonos" ? (
+              <DeviceCards rows={rows} onOpenPort={onOpenPort} printing={printing} />
+            ) : (
+              <>
+                <p className="report-count">{data.filas.length} fila{data.filas.length === 1 ? "" : "s"}{VISUAL.includes(kind) ? " · detalle" : ""}</p>
+                <div className="table-scroll sonar-table">
+                  <SonarDataTable
+                    columns={columns}
+                    data={rows}
+                    keyField="_key"
+                    pagination={!printing}
+                    noDataComponent="Sin datos para este reporte."
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>

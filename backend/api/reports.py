@@ -255,7 +255,7 @@ def aps_telefonos(params, now):
         rows.append(_port_row(p, vecino_tipo=kind, tipo_equipo=labels[kind], vecino=p.vecino_nombre or p.mac_telefono,
                               plataforma=p.vecino_plataforma or '', vecino_ip=p.vecino_ip or '',
                               vlan=p.voice_vlan if kind == 'telefono' and p.voice_vlan else p.vlan,
-                              poe_w=_poe_w(p)))
+                              poe_w=_poe_w(p), enlace=p.estado_operativo))
     totals = {kind: sum(1 for row in rows if row['vecino_tipo'] == kind) for kind in ('ap', 'telefono')}
     return dict(titulo='Access points y teléfonos IP',
                 descripcion=f"{totals['ap']} access points y {totals['telefono']} teléfonos detectados por CDP/LLDP.",
