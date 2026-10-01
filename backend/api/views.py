@@ -202,7 +202,9 @@ def site_summary(switches, items, open_alerts, now, plantel=None):
 def summary(request):
     """Un solo request para la vista Resumen (?plantel=<id> opcional), cacheado un ciclo del worker."""
     plantel = site_id(request.GET)
-    key = f'sonar-summary:{plantel or "all"}'
+    # Un arranque del worker invalida el resumen guardado (los estados cambian a "iniciando").
+    started = EstadoMonitoreo.actual().iniciado
+    key = f'sonar-summary:{plantel or "all"}:{started.timestamp() if started else 0}'
     data = cache.get(key)
     if data is None or request.GET.get('refresh') == '1':
         data = build_summary(plantel=plantel)

@@ -20,6 +20,28 @@ from sonar.database.django_store import BackupScheduler
 log = get_logger(__name__)
 
 
+# InfluxDB sólo guarda el histórico: si está apagado el sondeo cuenta como
+# exitoso y se avisa una vez al caer y otra al volver, no por cada switch.
+_influx_disponible = True
+
+
+async def escribir_historico(writer: InfluxWriter, datos: dict) -> None:
+    global _influx_disponible
+    try:
+        await asyncio.to_thread(writer.escribir_cpu, datos)
+        await asyncio.to_thread(writer.escribir_sistema, datos)
+        await asyncio.to_thread(writer.escribir_interfaces, datos)
+        await asyncio.to_thread(writer.escribir_optica, datos)
+    except Exception as e:
+        if _influx_disponible:
+            log.warning(f"InfluxDB no disponible; se omite el histórico hasta que vuelva: {e}")
+        _influx_disponible = False
+    else:
+        if not _influx_disponible:
+            log.info("InfluxDB disponible de nuevo; el histórico continúa.")
+        _influx_disponible = True
+
+
 async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
     """
     Consulta un switch real via SNMP y escribe sus datos en InfluxDB.
@@ -43,10 +65,7 @@ async def procesar_switch(dispositivo: dict, writer: InfluxWriter) -> bool:
             log.warning(f"[{nombre}] Sin datos, saltando...")
             return False
 
-        await asyncio.to_thread(writer.escribir_cpu, datos)
-        await asyncio.to_thread(writer.escribir_sistema, datos)
-        await asyncio.to_thread(writer.escribir_interfaces, datos)
-        await asyncio.to_thread(writer.escribir_optica, datos)
+        await escribir_historico(writer, datos)
 
         log.info(f"[{nombre}] ok CPU={datos['cpu_5m']}% "
                  f"Interfaces={len(datos['interfaces'])}")

@@ -15,7 +15,39 @@ UPDATE_FIELDS = ['nombre', 'descripcion', 'estado_operativo', *ERROR_FIELDS, 'er
                  'bps_entrada', 'bps_salida', 'uso_pct', 'ultimo_cambio', 'ultimo_activo', 'optica']
 SWITCH_EXTRA_FIELDS = ('temperatura_c', 'hardware', 'poe_presupuesto_w', 'poe_consumo_w')
 EVENT_RETENTION = timedelta(days=7)
+# Más tiempo que esto entre dos lecturas exitosas (SONAR apagado o el switch sin
+# responder): los contadores acumulados no se atribuyen al sondeo actual.
+MAX_POLL_GAP = timedelta(minutes=10)
+# sysUpTime es TimeTicks de 32 bits: vuelve a cero cada 2^32 centésimas (~497 días).
+UPTIME_WRAP_SECONDS = 2 ** 32 // 100
+# Holgura para comparar uptime con el tiempo transcurrido entre sondeos.
+UPTIME_SLACK_SECONDS = 120
 LINK_STATES = ('up', 'down')
+
+
+def detect_reboot(previous_uptime, current_uptime, elapsed):
+    """True si el equipo arrancó después de la lectura exitosa anterior.
+
+    `elapsed` son los segundos desde esa lectura (None si se desconoce). Se
+    compara el uptime esperado (anterior + transcurrido) con el leído, así que
+    también se detecta un reinicio ocurrido con SONAR apagado aunque el uptime
+    nuevo ya supere al anterior. No cuentan la vuelta a cero de sysUpTime
+    (~497 días) ni el cambio de unidades de versiones anteriores.
+    """
+    if previous_uptime is None or current_uptime is None:
+        return False
+    if elapsed is None:
+        # Versiones anteriores guardaban centésimas de segundo: el primer sondeo con segundos no es un reinicio.
+        legacy = abs(current_uptime * 100 - previous_uptime) <= previous_uptime * 0.01 + 100_000
+        return current_uptime < previous_uptime and not legacy
+    # El reloj del equipo y el del servidor derivan un poco en pausas largas.
+    slack = UPTIME_SLACK_SECONDS + elapsed * 0.001
+    if abs(current_uptime - (previous_uptime / 100 + elapsed)) <= slack:
+        return False  # El valor anterior estaba en centésimas.
+    expected = previous_uptime + elapsed
+    if expected >= UPTIME_WRAP_SECONDS and abs((expected - UPTIME_WRAP_SECONDS) - current_uptime) <= slack:
+        return False
+    return current_uptime < expected - slack
 
 
 def traffic(port, previous, now):
@@ -39,12 +71,14 @@ def link_history(port, previous_state, item, now, events):
     state = port.estado_operativo
     if state == 'up':
         port.ultimo_activo = now
+    known_change = item.get('ultimo_cambio_hace_s')
     if previous_state in LINK_STATES and state in LINK_STATES and previous_state != state:
-        port.ultimo_cambio = now
+        # ifLastChange da el momento real del cambio si ocurrió con SONAR apagado.
+        port.ultimo_cambio = now - timedelta(seconds=known_change) if known_change is not None else now
         events.append(EventoPuerto(puerto=port, estado=state, momento=now))
-    elif port.ultimo_cambio is None and item.get('ultimo_cambio_hace_s') is not None:
-        # Primer sondeo: ifLastChange dice desde cuándo el puerto está así.
-        port.ultimo_cambio = now - timedelta(seconds=item['ultimo_cambio_hace_s'])
+    elif known_change is not None and (port.ultimo_cambio is None or previous_state not in LINK_STATES):
+        # Primer sondeo, o el anterior no respondió: ifLastChange dice desde cuándo el puerto está así.
+        port.ultimo_cambio = now - timedelta(seconds=known_change)
     if state == 'down' and port.ultimo_activo is None and port.ultimo_cambio:
         port.ultimo_activo = port.ultimo_cambio
 
@@ -94,15 +128,12 @@ def record_poll(switch_id, hostname, datos):
     if switch is None:
         return
     now = timezone.now()
-    previous_uptime = switch.uptime_segundos
+    previous_ok = switch.ultima_lectura_exitosa or (switch.ultima_consulta if switch.lectura_correcta else None)
+    elapsed = (now - previous_ok).total_seconds() if previous_ok else None
+    # Tras una pausa (o la primera vez) la lectura es sólo la nueva base de los contadores.
+    resumed = elapsed is None or elapsed > MAX_POLL_GAP.total_seconds()
     current_uptime = datos.get('uptime_segundos') if datos else None
-    reboot_detected = (
-        previous_uptime is not None and current_uptime is not None
-        and current_uptime < previous_uptime
-        # Versiones anteriores guardaban centésimas de segundo: el primer
-        # sondeo con segundos no es un reinicio.
-        and not abs(current_uptime * 100 - previous_uptime) <= previous_uptime * 0.01 + 100_000
-    )
+    reboot_detected = detect_reboot(switch.uptime_segundos, current_uptime, elapsed)
     Switch.objects.filter(pk=switch.pk).update(
         ultima_consulta=now, lectura_correcta=datos is not None,
         **({'ultima_lectura_exitosa': now} if datos else {}),
@@ -115,7 +146,8 @@ def record_poll(switch_id, hostname, datos):
             # Sin la MIB correspondiente quedan vacíos: no se muestran lecturas antiguas.
             **{field: datos.get(field) for field in SWITCH_EXTRA_FIELDS})
         if reboot_detected:
-            Switch.objects.filter(pk=switch.pk).update(ultimo_reinicio=now)
+            # El arranque real, no el momento en que SONAR lo notó (pudo estar apagado).
+            Switch.objects.filter(pk=switch.pk).update(ultimo_reinicio=now - timedelta(seconds=current_uptime))
     if datos is None:
         # Puertos no observados dejan de mostrar métricas antiguas como actuales.
         switch.puertos.update(estado_operativo='unknown', errores_entrada=None, errores_salida=None,
@@ -149,7 +181,7 @@ def record_poll(switch_id, hostname, datos):
         port.estado_operativo = item.get('estado', 'unknown')
         for field in ERROR_FIELDS:
             setattr(port, field, item.get(field))
-        port.errores_nuevos = new_errors(previous, tuple(item.get(field) for field in ERROR_FIELDS))
+        port.errores_nuevos = None if resumed else new_errors(previous, tuple(item.get(field) for field in ERROR_FIELDS))
         if port.errores_nuevos:
             port.ultimo_error = now
         port.es_fisico = is_physical_interface(port.nombre)
@@ -160,7 +192,8 @@ def record_poll(switch_id, hostname, datos):
         for field in OPTIONAL_FIELDS:
             if field in item:
                 setattr(port, field, item[field])
-        traffic(port, previous_traffic, now)
+        # Un promedio de horas no es el tráfico actual: tras una pausa se espera al siguiente sondeo.
+        traffic(port, (None,) * 3 if resumed else previous_traffic, now)
         link_history(port, previous_state, item, now, events)
         if optics_by_port is not None:
             optic = optics_by_port.get(indice) or optics_by_port.get(port.nombre)

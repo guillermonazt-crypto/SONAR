@@ -47,17 +47,30 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             self.assertTrue(await task)
 
-    async def test_write_failure_is_reported(self):
+    async def test_influx_down_is_not_a_failed_poll(self):
+        # El sondeo SNMP salió bien: sin InfluxDB sólo falta el histórico y se avisa una vez.
         writer = Mock()
         writer.escribir_cpu.side_effect = OSError("offline")
-        with patch.object(worker, "obtener_datos_reales", AsyncMock(return_value=DATA)):
-            self.assertFalse(await worker.procesar_switch(DEVICE, writer))
+        with patch.object(worker, "obtener_datos_reales", AsyncMock(return_value=DATA)),                 patch.object(worker, "_influx_disponible", True), patch.object(worker.log, "warning") as warning:
+            self.assertTrue(await worker.procesar_switch(DEVICE, writer))
+            self.assertTrue(await worker.procesar_switch(DEVICE, writer))
+            self.assertEqual(warning.call_count, 1)
+            writer.escribir_cpu.side_effect = None
+            self.assertTrue(await worker.procesar_switch(DEVICE, writer))
+            self.assertTrue(worker._influx_disponible)
+
+    async def test_failed_snmp_poll_is_reported(self):
+        with patch.object(worker, "obtener_datos_reales", AsyncMock(return_value=None)):
+            self.assertFalse(await worker.procesar_switch(DEVICE, Mock()))
 
     async def test_inventory_reloaded_and_writer_closed(self):
         writer = Mock()
-        with patch.object(worker, "validate_snmp"), patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])):
+        with patch.object(worker, "validate_snmp"), patch.object(worker, "InfluxWriter", return_value=writer), patch.object(worker, "load_inventory", side_effect=[[DEVICE], []]) as load, patch.object(worker, "ejecutar_ciclo", AsyncMock()) as cycle, patch.object(worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError])),                 patch.object(worker, "mark_worker_started") as started, patch.object(worker, "worker_heartbeat") as beat:
             with self.assertRaises(asyncio.CancelledError):
                 await worker.main()
+        # Arranque registrado una vez (abre la gracia) y un latido por ciclo completo.
+        started.assert_called_once()
+        self.assertEqual(beat.call_count, 2)
         self.assertEqual(load.call_count, 2)
         self.assertEqual(cycle.await_args_list[1].args[0], [])
         writer.cerrar.assert_called_once()

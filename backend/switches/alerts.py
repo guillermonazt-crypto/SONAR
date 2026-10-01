@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from django.core.mail import send_mail
 from django.utils import timezone
 
-from .health import assess, port_stats, thresholds_by_role
+from .health import assess, connection_state, port_stats, thresholds_by_role
 from .models import Alerta, EstadoMonitoreo, Mantenimiento, Switch
 
 log = logging.getLogger(__name__)
@@ -36,10 +36,15 @@ def _where(switch):
     return f'{switch.nombre} ({switch.hostname}) · {switch.plantel.nombre}'
 
 
-def _escalation(switch, alert, reasons, minutes, maintenance, now):
-    """Aviso único cuando un episodio sigue abierto sin reconocer más de `minutes`."""
+def _escalation(switch, alert, reasons, minutes, maintenance, now, started=None):
+    """Aviso único cuando un episodio sigue abierto sin reconocer más de `minutes`.
+
+    Sólo cuenta el tiempo con SONAR encendido: un episodio que viene de antes
+    del arranque del worker (`started`) se mide desde ese arranque.
+    """
+    since = max(alert.inicio, started) if alert is not None and started else (alert and alert.inicio)
     if (not minutes or alert is None or alert.reconocida_en or alert.escalada_en or alert.en_mantenimiento
-            or maintenance is not None or now - alert.inicio < timedelta(minutes=minutes)):
+            or maintenance is not None or now - since < timedelta(minutes=minutes)):
         return None
     # Condicional: si otro proceso ya la escaló, no se repite el aviso.
     if not Alerta.objects.filter(pk=alert.pk, escalada_en__isnull=True).update(escalada_en=now):
@@ -66,8 +71,12 @@ def evaluate(switch_id, now=None):
     if switch is None:
         return None
     thresholds = thresholds_by_role()[switch.rol]
-    level, reasons = assess(switch, port_stats([switch.pk], now)[switch.pk], thresholds, now,
-                            started=EstadoMonitoreo.actual().iniciado)
+    started = EstadoMonitoreo.actual().iniciado
+    if connection_state(switch, started, now)[0] == 'iniciando':
+        # Periodo de gracia tras arrancar SONAR: no se abre, cierra ni notifica
+        # nada hasta tener una lectura nueva (o hasta que la gracia termine).
+        return None
+    level, reasons = assess(switch, port_stats([switch.pk], now)[switch.pk], thresholds, now, started=started)
     was_critical = switch.nivel_alerta == 'critical'
     is_critical = level == 'critical'
     open_alerts = list(Alerta.objects.filter(switch=switch, fin__isnull=True).order_by('inicio'))
@@ -84,7 +93,8 @@ def evaluate(switch_id, now=None):
         if not was_critical:
             Switch.objects.filter(pk=switch.pk).update(nivel_alerta=level)
             return None
-        return _escalation(switch, open_alert, critical_reasons, thresholds['escalar_minutos'], maintenance, now)
+        return _escalation(switch, open_alert, critical_reasons, thresholds['escalar_minutos'], maintenance, now,
+                           started)
     if was_critical == is_critical:
         if switch.nivel_alerta != level:
             Switch.objects.filter(pk=switch.pk).update(nivel_alerta=level)
