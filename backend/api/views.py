@@ -11,14 +11,15 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
-from switches.health import (STALE_MINUTES, assess, connection_state, in_grace, port_stats, reason_type,
+from switches.health import (LEVEL_RANK, STALE_MINUTES, assess, connection_state, in_grace, port_stats, reason_type,
                              summarize_sites, thresholds_by_role)
 from switches import backups, discovery
 from switches.models import (Alerta, Descubierto, EstadoMonitoreo, Mantenimiento, Puerto, Respaldo, Switch,
                              UmbralOptico)
 from usuarios.audit import differences, registrar, snapshot
 from usuarios.models import Bitacora
-from switches.optics import assess_optic, effective_limits, sort_key as optic_sort_key
+from switches.optics import (ETA_CRITICAL_DAYS, ETA_WARNING_DAYS, PREDICTION_TARGET_DBM, assess_optic,
+                             effective_limits, sort_key as optic_sort_key)
 from . import history, reports
 from .reports import site_id
 from .search import search as search_devices
@@ -284,6 +285,39 @@ def optics(request):
         # Se filtra la copia cacheada de toda la red: un solo caché para todos los planteles.
         data = dict(data, transceptores=[item for item in data['transceptores'] if item['switch']['plantel'] == plantel])
     return JsonResponse(data)
+
+
+def build_optics_prediction(plantel=None):
+    """Tendencia de RX por transceptor (calculada por el worker cada hora) y días hasta fallar."""
+    ports = Puerto.objects.filter(optica__isnull=False, switch__activo=True)
+    if plantel is not None:
+        ports = ports.filter(switch__plantel_id=plantel)
+    items = []
+    for port in ports.select_related('switch__plantel').only(
+            'pk', 'nombre', 'estado_operativo', 'optica', 'switch__nombre', 'switch__hostname',
+            'switch__plantel_id', 'switch__plantel__nombre'):
+        prediction = (port.optica or {}).get('prediccion')
+        if not prediction:
+            continue
+        switch = port.switch
+        items.append(dict(prediction, puerto_id=port.pk, interfaz=port.nombre, enlace=port.estado_operativo,
+                          rx_dbm=port.optica.get('rx_dbm'),
+                          switch=dict(id=switch.pk, nombre=switch.nombre, hostname=switch.hostname,
+                                      plantel=switch.plantel_id, plantel_nombre=switch.plantel.nombre)))
+    # Lo más urgente primero; sin fecha estimada (RX estable o subiendo) al final.
+    items.sort(key=lambda item: (-LEVEL_RANK[item['nivel']], item['eta_dias'] is None, item['eta_dias'] or 0,
+                                 item['switch']['nombre'], item['interfaz']))
+    counts = {level: sum(1 for item in items if item['nivel'] == level) for level in ('critical', 'warning', 'ok')}
+    return dict(generado=timezone.now().isoformat(), objetivo_dbm=PREDICTION_TARGET_DBM,
+                eta_dias=dict(critico=ETA_CRITICAL_DAYS, atencion=ETA_WARNING_DAYS), resumen=counts,
+                predicciones=items)
+
+
+@require_GET
+@requires_session
+def optics_prediction(request):
+    """GET /api/opticas/prediccion/: pendiente dB/día y ETA en días hasta -24 dBm por óptica."""
+    return JsonResponse(build_optics_prediction(site_id(request.GET)))
 
 
 class AuditedMixin:

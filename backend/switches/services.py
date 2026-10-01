@@ -1,11 +1,12 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from .interfaces import is_physical_interface
-from .optics import update_baseline
-from .models import EstadoMonitoreo, EventoPuerto, Switch, Puerto
+from .optics import (PREDICTION_WINDOW, SAMPLE_EVERY, SAMPLE_RETENTION, predict_rx, update_baseline,
+                     usable_rx)
+from .models import EstadoMonitoreo, EventoPuerto, MuestraOptica, Switch, Puerto
 
 ERROR_FIELDS = ('errores_entrada', 'errores_salida', 'errores_crc')
 OPTIONAL_FIELDS = ('es_trunk', 'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp', 'vlan', 'voice_vlan',
@@ -95,7 +96,37 @@ def optic_reading(previous, item, now):
     reading['umbrales'] = reading['umbrales'] or {}
     reading['rx_base_dbm'] = update_baseline(previous, reading, now)
     reading['time'] = now.isoformat()
+    # La predicción se recalcula cada hora (sample_optics); entre tanto se conserva.
+    if previous and previous.get('prediccion'):
+        reading['prediccion'] = previous['prediccion']
     return reading
+
+
+def sample_optics(ports, now):
+    """Guarda una muestra de RX por hora y recalcula la predicción de esos puertos.
+
+    `ports`: puertos ya guardados con su lectura DOM nueva en `optica`. Devuelve las
+    muestras a crear; la predicción queda en port.optica['prediccion'].
+    """
+    candidates = {port.pk: port for port in ports if port.pk and port.optica and usable_rx(port.optica) is not None}
+    if not candidates:
+        return []
+    last = dict(MuestraOptica.objects.filter(puerto_id__in=candidates).values('puerto_id')
+                .annotate(last=Max('momento')).values_list('puerto_id', 'last'))
+    due = [pk for pk in candidates if last.get(pk) is None or now - last[pk] >= SAMPLE_EVERY]
+    if not due:
+        return []
+    history = {}
+    for pk, at, rx in (MuestraOptica.objects.filter(puerto_id__in=due, momento__gte=now - PREDICTION_WINDOW)
+                       .values_list('puerto_id', 'momento', 'rx_dbm')):
+        history.setdefault(pk, []).append((at, rx))
+    samples = []
+    for pk in due:
+        port = candidates[pk]
+        rx = usable_rx(port.optica)
+        samples.append(MuestraOptica(puerto=port, momento=now, rx_dbm=rx))
+        port.optica['prediccion'] = predict_rx(history.get(pk, []) + [(now, rx)], now)
+    return samples
 
 
 def new_errors(previous, current):
@@ -241,7 +272,11 @@ def record_poll(switch_id, hostname, datos, verificacion=None):
             port.errores_entrada = port.errores_salida = port.errores_crc = port.errores_nuevos = None
             to_update.append(port)
 
+    samples = sample_optics(to_update, now) if optics_by_port is not None else []
     Puerto.objects.bulk_create(to_create)
     Puerto.objects.bulk_update(to_update, UPDATE_FIELDS)
+    MuestraOptica.objects.bulk_create(samples)
+    if samples:
+        MuestraOptica.objects.filter(puerto__switch=switch, momento__lt=now - SAMPLE_RETENTION).delete()
     EventoPuerto.objects.bulk_create(events)
     EventoPuerto.objects.filter(puerto__switch=switch, momento__lt=now - EVENT_RETENTION).delete()

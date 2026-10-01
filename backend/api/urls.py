@@ -16,6 +16,7 @@ urlpatterns = [path('auth/session/', views.session), path('auth/login/', views.s
                path('resumen/', views.summary),
                path('buscar/', views.search),
                path('opticas/', views.optics),
+               path('opticas/prediccion/', views.optics_prediction),
                path('reportes/<slug:kind>/', views.report),
                path('respaldos/<int:pk>/', views.backup_detail),
                path('', include(router.urls))]

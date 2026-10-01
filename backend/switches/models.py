@@ -165,6 +165,19 @@ class Puerto(models.Model):
         return f"{self.switch.nombre} — {self.nombre} [{self.estado}]"
 
 
+class MuestraOptica(models.Model):
+    """Muestra horaria de RX de un transceptor: base de la predicción de degradación."""
+    puerto = models.ForeignKey(Puerto, on_delete=models.CASCADE, related_name='muestras_opticas')
+    momento = models.DateTimeField()
+    rx_dbm = models.FloatField()
+
+    class Meta:
+        verbose_name = "Muestra óptica"
+        verbose_name_plural = "Muestras ópticas"
+        ordering = ['puerto', 'momento']
+        indexes = [models.Index(fields=['puerto', 'momento'])]
+
+
 class EventoPuerto(models.Model):
     """Cambio de estado up/down observado; sirve para detectar puertos inestables."""
     puerto = models.ForeignKey(Puerto, on_delete=models.CASCADE, related_name='eventos')
