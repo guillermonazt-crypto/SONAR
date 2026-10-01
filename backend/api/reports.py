@@ -267,16 +267,30 @@ def aps_telefonos(params, now):
 def opticas(params, now):
     from .views import build_optics
     data = build_optics(site_id(params))
-    rows = [dict(switch=(item['switch'] or {}).get('nombre') or item['device'], puerto=item['interfaz'],
-                 rx_dbm=item['rx_dbm'], rx_base_dbm=item.get('rx_base_dbm'), tx_dbm=item['tx_dbm'],
-                 temperatura=item['temperatura'], voltaje_v=item.get('voltaje_v'), bias_ma=item.get('bias_ma'),
-                 atenuacion=item['atenuacion'], nivel=item['nivel'],
-                 motivos='; '.join(reason['text'] for reason in item['motivos'])) for item in data['transceptores']]
+    rows = []
+    for item in data['transceptores']:
+        module, errors, prediction = item.get('modulo') or {}, item.get('errores') or {}, item.get('prediccion') or {}
+        rows.append(dict(
+            switch=(item['switch'] or {}).get('nombre') or item['device'], switch_id=(item['switch'] or {}).get('id'),
+            puerto=item['interfaz'], puerto_id=item.get('puerto_id'),
+            rx_dbm=item['rx_dbm'], rx_base_dbm=item.get('rx_base_dbm'), tx_dbm=item['tx_dbm'],
+            temperatura=item['temperatura'], voltaje_v=item.get('voltaje_v'), bias_ma=item.get('bias_ma'),
+            margen_rx_db=item.get('margen_rx_db'), perdida_enlace_db=item.get('perdida_enlace_db'),
+            atenuacion=item['atenuacion'], delta_rx_24h=item.get('delta_rx_24h'), delta_rx_7d=item.get('delta_rx_7d'),
+            pendiente_db_dia=prediction.get('pendiente_db_dia'), eta_dias=prediction.get('eta_dias'),
+            errores_crc=errors.get('errores_crc'), errores_entrada=errors.get('errores_entrada'),
+            modelo=module.get('modelo') or module.get('descripcion'), serie=module.get('serie'),
+            longitud_onda_nm=module.get('longitud_onda_nm'), nivel=item['nivel'],
+            motivos='; '.join(reason['text'] for reason in item['motivos'])))
     return dict(titulo='Ópticas SFP', descripcion=data['detalle'] or 'Última lectura DOM de cada transceptor.',
-                columnas=[('switch', 'Switch'), ('puerto', 'Interfaz'), ('rx_dbm', 'RX dBm'), ('rx_base_dbm', 'RX base 7 d'),
-                          ('tx_dbm', 'TX dBm'), ('temperatura', 'Temp °C'), ('voltaje_v', 'Voltaje V'),
-                          ('bias_ma', 'Bias mA'), ('atenuacion', 'Atenuación dB'), ('nivel', 'Nivel'),
-                          ('motivos', 'Motivos')], filas=rows)
+                columnas=[('switch', 'Switch'), ('puerto', 'Interfaz'), ('nivel', 'Nivel'), ('rx_dbm', 'RX dBm'),
+                          ('rx_base_dbm', 'RX base 7 d'), ('tx_dbm', 'TX dBm'), ('temperatura', 'Temp °C'),
+                          ('voltaje_v', 'Voltaje V'), ('bias_ma', 'Bias mA'), ('margen_rx_db', 'Margen RX dB'),
+                          ('perdida_enlace_db', 'Pérdida enlace dB'), ('atenuacion', 'TX−RX local dB'),
+                          ('delta_rx_24h', 'Δ RX 24 h'), ('delta_rx_7d', 'Δ RX 7 d'),
+                          ('pendiente_db_dia', 'dB/día'), ('eta_dias', 'ETA días'), ('errores_crc', 'CRC'),
+                          ('errores_entrada', 'Errores entrada'), ('modelo', 'Módulo'), ('serie', 'Serie'),
+                          ('longitud_onda_nm', 'λ nm'), ('motivos', 'Motivos')], filas=rows)
 
 
 TREND_DAYS = (7, 30)

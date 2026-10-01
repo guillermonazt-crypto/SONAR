@@ -36,14 +36,16 @@ def _reason(reasons, level, text):
 def effective_limits(reading, limits):
     """Umbrales que aplican a esta óptica.
 
-    {rx|tx|temp: {baja_alarma, baja_aviso, alta_aviso, alta_alarma, origen}}: cada
-    valor que el switch publica sustituye al global; origen='switch' si hay alguno.
+    {rx|tx|temp|voltaje|bias: {baja_alarma, baja_aviso, alta_aviso, alta_alarma, origen}}:
+    cada valor que el switch publica sustituye al global; origen='switch' si hay alguno.
+    Voltaje y bias sólo tienen los umbrales del módulo (no hay respaldo global).
     """
     own = reading.get('umbrales') or {}
     fallback = dict(
         rx=dict(baja_aviso=limits.rx_atencion, baja_alarma=limits.rx_riesgo, alta_aviso=limits.rx_saturacion),
         tx=dict(baja_aviso=limits.tx_minimo),
         temp=dict(alta_aviso=limits.temp_atencion, alta_alarma=limits.temp_riesgo),
+        voltaje={}, bias={},
     )
     result = {}
     for name, defaults in fallback.items():
@@ -51,7 +53,7 @@ def effective_limits(reading, limits):
         # La temperatura baja de un SFP no es un riesgo real: sólo cuenta la alta.
         if name == 'temp':
             published = {key: value for key, value in published.items() if key.startswith('alta')}
-        result[name] = dict(defaults, **published, origen='switch' if published else 'global')
+        result[name] = dict(defaults, **published, origen='switch' if published else 'global' if defaults else None)
     return result
 
 
@@ -79,7 +81,7 @@ def assess_optic(reading, limits):
     otro extremo están apagados a propósito o el puerto no está en uso.
     """
     reasons = []
-    per_metric = dict(rx='ok', tx='ok', temp='ok')
+    per_metric = dict(rx='ok', tx='ok', temp='ok', voltaje='ok', bias='ok')
     if reading.get('admin') == 'down':
         _reason(reasons, 'ok', 'Puerto deshabilitado (shutdown): no se evalúa la óptica')
         return 'ok', reasons, per_metric
@@ -103,7 +105,10 @@ def assess_optic(reading, limits):
                 reasons, 'warning', f'RX cayó {base - rx:.1f} dB frente a su línea base de 7 días ({base:.1f} dBm)'))
     per_metric['tx'] = _check(tx, limits_now['tx'], 'TX', 'dBm', 1, reasons)
     per_metric['temp'] = _check(temp, limits_now['temp'], 'Temperatura', '°C', 0, reasons)
-    level = _worst(_worst(level, per_metric['tx']), per_metric['temp'])
+    per_metric['voltaje'] = _check(reading.get('voltaje_v'), limits_now['voltaje'], 'Voltaje', 'V', 2, reasons)
+    per_metric['bias'] = _check(reading.get('bias_ma'), limits_now['bias'], 'Bias', 'mA', 1, reasons)
+    for metric in ('tx', 'temp', 'voltaje', 'bias'):
+        level = _worst(level, per_metric[metric])
     if reading.get('estado') == 'alerta':
         level = _worst(level, _reason(reasons, 'warning', 'El equipo reporta el sensor fuera de servicio'))
     prediction = reading.get('prediccion')

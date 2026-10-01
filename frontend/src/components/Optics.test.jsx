@@ -32,9 +32,44 @@ describe("Optics", () => {
     expect(screen.getByRole("button", { name: "En riesgo (1)" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Normales (1)" }));
     expect(screen.queryByText("RX -21.4 dBm (≤ -20)")).not.toBeInTheDocument();
-    const row = screen.getByText("Te1/1/1 · Apan").closest(".rdt_TableRow");
+    const row = screen.getByText("Te1/1/1 · Apan").closest(".optic-card");
     fireEvent.click(within(row).getByRole("button", { name: "Ver puerto" }));
     expect(onOpenPort).toHaveBeenCalledWith(sw, 11);
+  });
+
+  it("muestra de entrada voltaje, bias, enlace, tendencia, errores y módulo", async () => {
+    const serie = [-6.0, -6.1, -6.3, -6.4].map((rx, index) => ({ time: new Date(Date.now() - (3 - index) * 3600000).toISOString(), rx_dbm: rx, tx_dbm: -5.6 }));
+    api.optics.mockResolvedValue({
+      detalle: null, umbrales: limits,
+      transceptores: [reading("Gi1/0/25", "warning", [{ level: "warning", text: "RX baja 0.80 dB/día: llegará a -24 dBm en ~6 días (revisar conectores o fibra)" }], {
+        rx_dbm: -6.4, tx_dbm: -5.6, voltaje_v: 3.31, bias_ma: 4.6,
+        niveles: { rx: "warning", tx: "ok", temp: "ok", voltaje: "ok", bias: "ok" },
+        umbrales: { rx: module, voltaje: { baja_alarma: 2.97, baja_aviso: 3.14, alta_aviso: 3.47, alta_alarma: 3.63, origen: "switch" } },
+        margen_rx_db: 17.6, objetivo_dbm: -24, perdida_enlace_db: 0.9,
+        remoto: { switch: "SW_6_APAN_CASETA", puerto: "GigabitEthernet1/0/25", tx_dbm: -5.5 },
+        delta_rx_24h: -0.4, delta_rx_7d: -1.2, serie,
+        prediccion: { pendiente_db_dia: -0.8, eta_dias: 6, nivel: "warning", muestras: 120, objetivo_dbm: -24 },
+        errores: { errores_crc: 17, errores_entrada: 20, errores_salida: 0, errores_nuevos: 3, ultimo_error: new Date().toISOString() },
+        modulo: { modelo: "GLC-SX-MMD", serie: "AGJ1816R69C", revision: "V01", longitud_onda_nm: 850 },
+      })],
+    });
+    render(<Optics />);
+    const card = (await screen.findByText("GLC-SX-MMD · 850 nm · S/N AGJ1816R69C · rev. V01")).closest(".optic-card");
+    const inCard = within(card);
+    expect(inCard.getByText("3.31 V")).toBeInTheDocument();
+    expect(inCard.getByText("alarma ≤ 2.97 · aviso ≤ 3.14 · aviso ≥ 3.47 · alarma ≥ 3.63 V (módulo)")).toBeInTheDocument();
+    expect(inCard.getByText("4.6 mA")).toBeInTheDocument();
+    expect(inCard.getByText("-6.4 dBm")).toHaveClass("status-warning-text");
+    expect(inCard.getByText("+17.6 dB")).toBeInTheDocument();
+    expect(inCard.getByText("0.9 dB")).toBeInTheDocument();
+    expect(inCard.getByText(/TX remoto -5.5 dBm \(SW_6_APAN_CASETA GigabitEthernet1\/0\/25\)/)).toBeInTheDocument();
+    expect(inCard.getByText("-0.40 dB")).toBeInTheDocument();
+    expect(inCard.getByText("-1.20 dB")).toBeInTheDocument();
+    expect(inCard.getByText("-0.80 dB/día")).toBeInTheDocument();
+    expect(inCard.getByText("~6 días")).toHaveClass("status-warning-text");
+    expect(inCard.getByText("RX -6.4 dBm a -6.0 dBm · TX -5.6 dBm a -5.6 dBm")).toBeInTheDocument();
+    expect(inCard.getByText("17")).toHaveClass("status-warning-text");
+    expect(inCard.getByText("3")).toHaveClass("status-critical-text");
   });
 
   it("explica cuando InfluxDB no responde", async () => {

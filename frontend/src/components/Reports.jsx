@@ -144,6 +144,16 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
   const rows = useMemo(() => (data?.filas || []).map((row, index) => ({ ...row, _key: index })), [data]);
   const range = data?.rango;
   const { flagged, healthy } = useMemo(() => splitByRange(data?.kind, rows, range), [data, rows, range]);
+  // "Ver todas": la tabla completa (sanos incluidos) en los reportes que traen filas sanas.
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => setShowAll(false), [kind]);
+  const canShowAll = Boolean(range) && rows.length > flagged.length;
+  const listed = showAll && canShowAll ? rows : flagged;
+  const allToggle = canShowAll && (
+    <button type="button" className="text-button no-print" aria-pressed={showAll} onClick={() => setShowAll(!showAll)}>
+      {showAll ? "Solo fuera de rango" : `Ver todas (${rows.length})`}
+    </button>
+  );
   const columns = (data?.columnas || []).map((column) => ({
     name: column.titulo,
     sortable: true,
@@ -245,18 +255,23 @@ export default function Reports({ plantel = "", onOpenPort = () => {}, kinds = n
             {kind === "topologia" && <TopologyMap rows={data.filas} onOpenPort={onOpenPort} />}
             {data.detalle && <p className="worker-alert" role="status">{data.detalle}</p>}
             {data.serie && <TrendCharts serie={data.serie} />}
-            {range && !flagged.length ? (
-              <p className="report-healthy" role="status">✓ {healthy} {range.etiqueta}</p>
+            {range && !listed.length ? (
+              <p className="report-healthy" role="status">✓ {healthy} {range.etiqueta} {allToggle}</p>
             ) : (
               <>
                 <p className="report-count">
-                  {range ? `${flagged.length} fuera de rango` : `${data.filas.length} fila${data.filas.length === 1 ? "" : "s"}`}
+                  {range && listed === flagged ? `${flagged.length} fuera de rango` : `${data.filas.length} fila${data.filas.length === 1 ? "" : "s"}`}
                 </p>
-                {range && healthy > 0 && <p className="report-healthy-note">✓ {healthy} {range.etiqueta} (no se muestran)</p>}
+                {range && (healthy > 0 || showAll) && (
+                  <p className="report-healthy-note">
+                    {listed === flagged ? `✓ ${healthy} ${range.etiqueta} (no se muestran) ` : `Todas: ${flagged.length} fuera de rango y ${healthy} ${range.etiqueta} `}
+                    {allToggle}
+                  </p>
+                )}
                 <div className="table-scroll sonar-table">
                   <SonarDataTable
                     columns={columns}
-                    data={flagged}
+                    data={listed}
                     keyField="_key"
                     pagination={!printing}
                     noDataComponent="Sin datos para este reporte."

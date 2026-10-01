@@ -20,7 +20,7 @@ from usuarios.audit import differences, registrar, snapshot
 from usuarios.models import Bitacora
 from switches.optics import (ETA_CRITICAL_DAYS, ETA_WARNING_DAYS, PREDICTION_TARGET_DBM, assess_optic,
                              effective_limits, sort_key as optic_sort_key)
-from . import history, reports
+from . import history, optic_details, reports
 from .reports import site_id
 from .search import search as search_devices
 from .history import flux_string  # noqa: F401 (usado por pruebas)
@@ -257,7 +257,12 @@ def build_optics(plantel=None):
     ports = (ports
              .select_related('switch__plantel').only(
                  'pk', 'nombre', 'estado_operativo', 'optica', 'switch__nombre', 'switch__hostname',
-                 'switch__plantel_id', 'switch__plantel__nombre'))
+                 'switch__plantel_id', 'switch__plantel__nombre', 'vecino_nombre', 'vecino_puerto', 'vecino_ip',
+                 *optic_details.ERROR_FIELDS))
+    ports = list(ports)
+    now = timezone.now()
+    trends = optic_details.trends([port.pk for port in ports], now)
+    remote_tx = optic_details.remote_tx(ports)
     items = []
     for port in ports:
         switch = port.switch
@@ -271,6 +276,7 @@ def build_optics(plantel=None):
             switch=dict(id=switch.pk, nombre=switch.nombre, hostname=switch.hostname,
                         plantel=switch.plantel_id, plantel_nombre=switch.plantel.nombre),
             puerto_id=port.pk,
+            **optic_details.extras(port, reading, trends.get(port.pk), remote_tx.get(port.pk)),
         ))
     items.sort(key=optic_sort_key)
     return dict(generado=timezone.now().isoformat(), detalle=None,

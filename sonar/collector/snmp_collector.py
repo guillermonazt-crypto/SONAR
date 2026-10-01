@@ -386,14 +386,16 @@ async def _dom_structure(ip: str, community: str, types: dict[int, int]) -> dict
     values = await _get_many(ip, community, [f"{dom.OID_ENTITY['name']}.{i}" for i in indexes])
     names = {i: str(values.get(f"{dom.OID_ENTITY['name']}.{i}", '')) for i in indexes}
     optic = dom.optic_sensor_indexes(types, names)
-    structure = dict(names=names, parents={}, parent_names={}, parent_ifindex={}, thresholds={})
+    structure = dict(names=names, parents={}, parent_names={}, parent_ifindex={}, thresholds={}, modules={})
     if optic:
         values = await _get_many(ip, community, [f"{dom.OID_ENTITY['contained_in']}.{i}" for i in indexes])
         parents = {i: _safe_int(str(values.get(f"{dom.OID_ENTITY['contained_in']}.{i}"))) for i in indexes}
         optic_parents = sorted({parents[i] for i in optic if parents.get(i)})
+        module_oids = [dom.OID_ENTITY[key] for _field, key in dom.MODULE_FIELDS]
         values = await _get_many(ip, community, [
             *(f"{dom.OID_ENTITY['name']}.{p}" for p in optic_parents),
-            *(f"{dom.OID_ENTITY['alias']}.{p}.0" for p in optic_parents)])
+            *(f"{dom.OID_ENTITY['alias']}.{p}.0" for p in optic_parents),
+            *(f"{oid}.{p}" for p in optic_parents for oid in module_oids)])
         rows = {key: await _walk_oid_rows(ip, community, oid) for key, oid in dom.OID_THRESHOLD.items()}
         by_key = {key: {tuple(suffix): value for suffix, value in items if len(suffix) == 2}
                   for key, items in rows.items()}
@@ -406,7 +408,9 @@ async def _dom_structure(ip: str, community: str, types: dict[int, int]) -> dict
             parents=parents, thresholds=thresholds,
             parent_names={p: str(values.get(f"{dom.OID_ENTITY['name']}.{p}", '')) for p in optic_parents},
             parent_ifindex={p: dom.if_index_from_alias(values.get(f"{dom.OID_ENTITY['alias']}.{p}.0"))
-                            for p in optic_parents})
+                            for p in optic_parents},
+            modules={p: {key: values.get(f"{dom.OID_ENTITY[key]}.{p}") for _field, key in dom.MODULE_FIELDS}
+                     for p in optic_parents})
     _DOM_CACHE[ip] = (time.monotonic(), signature, structure)
     return structure
 
@@ -447,7 +451,8 @@ async def obtener_optica(dispositivo: dict, interfaces: list[dict]) -> list[dict
     admin = {i: _safe_int(str(values[f"{dom.OID_IF_ADMIN}.{i}"])) for i in if_indexes
              if f"{dom.OID_IF_ADMIN}.{i}" in values}
     return dom.build_transceivers(readings, structure['thresholds'], structure['parents'],
-                                  structure['parent_names'], structure['parent_ifindex'], interfaces, admin)
+                                  structure['parent_names'], structure['parent_ifindex'], interfaces, admin,
+                                  structure.get('modules'))
 
 
 async def obtener_identidad(dispositivo: dict) -> dict:

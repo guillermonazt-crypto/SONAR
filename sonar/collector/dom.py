@@ -7,6 +7,7 @@
 # Aquí sólo hay conversiones puras: la consulta SNMP vive en snmp_collector.
 
 import math
+import re
 
 from sonar.collector.extras import mentions_interface
 
@@ -34,6 +35,11 @@ OID_THRESHOLD = {
     'value': '1.3.6.1.4.1.9.9.91.1.2.1.1.4',
 }
 OID_ENTITY = {
+    'descr': '1.3.6.1.2.1.47.1.1.1.1.2',
+    'hardware_rev': '1.3.6.1.2.1.47.1.1.1.1.8',
+    'serial': '1.3.6.1.2.1.47.1.1.1.1.11',
+    'mfg': '1.3.6.1.2.1.47.1.1.1.1.12',
+    'model': '1.3.6.1.2.1.47.1.1.1.1.13',
     'name': '1.3.6.1.2.1.47.1.1.1.1.7',
     'contained_in': '1.3.6.1.2.1.47.1.1.1.1.4',
     # entAliasMappingIdentifier.<entPhysicalIndex>.0 = ifIndex OID de IF-MIB.
@@ -53,6 +59,47 @@ SEVERITY_ALARM = 20
 RELATION_LOW, RELATION_HIGH = (1, 2), (3, 4)
 # Los módulos Cisco informan -40 dBm (0 mW) cuando no reciben luz.
 NO_SIGNAL_DBM = -40.0
+
+
+# Datos de inventario del transceptor (ENTITY-MIB) que se guardan con la lectura.
+MODULE_FIELDS = (('descripcion', 'descr'), ('modelo', 'model'), ('serie', 'serial'), ('fabricante', 'mfg'),
+                 ('revision', 'hardware_rev'))
+# ENTITY-MIB no publica la longitud de onda: se deduce del tipo de módulo
+# (palabras del modelo o la descripción, p. ej. GLC-SX-MMD → SX → 850 nm).
+WAVELENGTH_BY_TYPE = (
+    (('BXU', 'BX10U', 'BXUP'), 1310), (('BXD', 'BX10D', 'BXDOWN'), 1490),
+    (('SX', 'SR', 'MMD', 'MM'), 850), (('LX', 'LH', 'LR', 'LX10', 'LRM'), 1310),
+    (('ZX', 'ER', 'EX', 'ZR'), 1550),
+)
+
+
+def wavelength_nm(*texts):
+    """Longitud de onda nominal (nm) según el tipo de módulo; None si no se reconoce."""
+    label = ' '.join(t for t in texts if t).upper()
+    match = re.search(r'(\d{3,4})\s?NM', label)
+    if match:
+        return int(match.group(1))
+    # "BX-U" y "BX10-D" se comparan sin guiones; el resto, palabra por palabra.
+    words = set(re.split(r'[^A-Z0-9]+', label)) | set(re.findall(r'BX(?:10)?-?[UD]', label.replace(' ', '')))
+    words |= {word.replace('-', '') for word in words}
+    # "1000BaseSX" / "10GBASE-LR": el tipo va después de BASE.
+    words |= {word.split('BASE', 1)[1] for word in words if 'BASE' in word}
+    for tokens, nm in WAVELENGTH_BY_TYPE:
+        if words & set(tokens):
+            return nm
+    return None
+
+
+def module_info(raw):
+    """{descripcion, modelo, serie, fabricante, revision, longitud_onda_nm} sin campos vacíos; None si no hay nada."""
+    info = {field: str(raw.get(key) or '').strip() for field, key in MODULE_FIELDS}
+    info = {field: value for field, value in info.items() if value and value.lower() not in ('n/a', 'none')}
+    if not info:
+        return None
+    nm = wavelength_nm(info.get('modelo'), info.get('descripcion'))
+    if nm:
+        info['longitud_onda_nm'] = nm
+    return info
 
 
 def sensor_value(raw, scale, precision):
@@ -149,7 +196,8 @@ def sensor_thresholds(rows, sensor):
     return result
 
 
-def build_transceivers(sensors, thresholds, parents, parent_names, parent_ifindex, interfaces, admin_status=None):
+def build_transceivers(sensors, thresholds, parents, parent_names, parent_ifindex, interfaces, admin_status=None,
+                       modules=None):
     """Agrupa los sensores DOM por puerto.
 
     sensors: {índice: {type, scale, precision, value, status, name}} (value crudo).
@@ -158,8 +206,10 @@ def build_transceivers(sensors, thresholds, parents, parent_names, parent_ifinde
     parent_names / parent_ifindex: {índice del transceptor: nombre / ifIndex}.
     interfaces: lista del colector [{indice, nombre, estado}].
     admin_status: {ifIndex: 1 up | 2 down}.
+    modules: {índice del transceptor: {descr, model, serial, mfg, hardware_rev}} (ENTITY-MIB).
     """
     admin_status = admin_status or {}
+    modules = modules or {}
     by_index = {item['indice']: item for item in interfaces}
     by_name = {item['nombre']: item for item in interfaces}
     optic_parents = {parents.get(index) for index in optic_sensor_indexes(
@@ -179,7 +229,8 @@ def build_transceivers(sensors, thresholds, parents, parent_names, parent_ifinde
         slot = result.setdefault(port['nombre'], dict(
             interfaz=port['nombre'], indice=port['indice'], rx_dbm=None, tx_dbm=None, temp_c=None,
             voltaje_v=None, bias_ma=None, estado='ok', sin_senal=False, oper=port.get('estado'),
-            admin={1: 'up', 2: 'down', 3: 'testing'}.get(admin_status.get(port['indice'])), umbrales={}))
+            admin={1: 'up', 2: 'down', 3: 'testing'}.get(admin_status.get(port['indice'])), umbrales={},
+            modulo=module_info(modules.get(parent, {}))))
         status = sensor.get('status')
         if status == STATUS_NONOPERATIONAL:
             slot['estado'] = 'alerta'
@@ -195,7 +246,7 @@ def build_transceivers(sensors, thresholds, parents, parent_names, parent_ifinde
             value = min(value, slot[field])
         slot[field] = value
         limits = sensor_thresholds(thresholds.get(index, []), sensor)
-        if limits and kind in ('rx', 'tx', 'temp'):
+        if limits:
             slot['umbrales'][kind] = limits
     for slot in result.values():
         if slot['rx_dbm'] is not None and slot['rx_dbm'] <= NO_SIGNAL_DBM + 0.05:

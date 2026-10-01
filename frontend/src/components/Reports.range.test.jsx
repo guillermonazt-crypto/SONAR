@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import Reports, { splitByRange } from "./Reports";
 import { api } from "../api/client";
 
@@ -37,6 +37,27 @@ describe("Reportes por excepción", () => {
     expect(await screen.findByText("Ventilador 1")).toBeInTheDocument();
     expect(screen.queryByText("Fuente 1")).toBeNull();
     expect(screen.getByText("✓ 2 componentes sanos (no se muestran)")).toBeInTheDocument();
+  });
+
+  it("'Ver todas' muestra la tabla completa y vuelve a sólo lo fuera de rango", async () => {
+    api.report.mockResolvedValue(hardware([
+      { switch: "SW-CORE", componente: "Ventilador 1", estado: "critical" },
+      { switch: "SW-CORE", componente: "Fuente 1", estado: "ok" },
+    ]));
+    render(<Reports kinds={["hardware"]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver todas (2)" }));
+    expect(screen.getByText("Fuente 1")).toBeInTheDocument();
+    expect(screen.getByText("Todas: 1 fuera de rango y 1 componentes sanos", { exact: false })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Solo fuera de rango" }));
+    expect(screen.queryByText("Fuente 1")).toBeNull();
+  });
+
+  it("con todo sano también deja ver la tabla completa", async () => {
+    api.report.mockResolvedValue(hardware([{ switch: "SW-ACC", componente: "Fuente 1", estado: "ok" }]));
+    render(<Reports kinds={["hardware"]} />);
+    expect(await screen.findByText("✓ 1 componentes sanos", { exact: false })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ver todas (1)" }));
+    expect(screen.getByText("Fuente 1")).toBeInTheDocument();
   });
 
   it("los reportes sin rango no se filtran", () => {

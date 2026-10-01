@@ -87,13 +87,16 @@ def link_history(port, previous_state, item, now, events):
 
 OPTIC_FIELDS = (('rx_dbm', 'rx_dbm'), ('tx_dbm', 'tx_dbm'), ('temperatura', 'temp_c'), ('voltaje_v', 'voltaje_v'),
                 ('bias_ma', 'bias_ma'), ('estado', 'estado'), ('sin_senal', 'sin_senal'), ('admin', 'admin'),
-                ('umbrales', 'umbrales'))
+                ('umbrales', 'umbrales'), ('modulo', 'modulo'))
 
 
 def optic_reading(previous, item, now):
     """Lectura DOM a guardar en Puerto.optica, con la línea base de RX al día."""
     reading = {field: item.get(source) for field, source in OPTIC_FIELDS}
     reading['umbrales'] = reading['umbrales'] or {}
+    # El inventario del módulo (modelo, serie) se conserva si una lectura no lo trae.
+    if not reading['modulo'] and previous and previous.get('modulo'):
+        reading['modulo'] = previous['modulo']
     reading['rx_base_dbm'] = update_baseline(previous, reading, now)
     reading['time'] = now.isoformat()
     # La predicción se recalcula cada hora (sample_optics); entre tanto se conserva.
@@ -124,7 +127,7 @@ def sample_optics(ports, now):
     for pk in due:
         port = candidates[pk]
         rx = usable_rx(port.optica)
-        samples.append(MuestraOptica(puerto=port, momento=now, rx_dbm=rx))
+        samples.append(MuestraOptica(puerto=port, momento=now, rx_dbm=rx, tx_dbm=port.optica.get('tx_dbm')))
         port.optica['prediccion'] = predict_rx(history.get(pk, []) + [(now, rx)], now)
     return samples
 

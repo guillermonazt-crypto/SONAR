@@ -1,0 +1,68 @@
+/* Ópticas SFP: una tarjeta por transceptor con todas sus métricas a la vista. */
+.optic-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.optic-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--signal-ok, var(--ok));
+  background: var(--surface);
+  min-width: 0;
+}
+.optic-card.optic-warning { border-left-color: var(--signal-warning, var(--warning)); }
+.optic-card.optic-critical { border-left-color: var(--signal-critical, var(--critical)); }
+.optic-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.optic-card-title { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.optic-card-title small { color: var(--muted); }
+.optic-module { overflow-wrap: anywhere; }
+
+.optic-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.optic-metrics .optic-metric {
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.optic-metrics .optic-metric-warning { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.optic-metrics .optic-metric-critical { background: color-mix(in srgb, var(--critical) 12%, transparent); }
+.optic-metric-label { color: var(--muted); font-size: 12px; }
+.optic-metrics .optic-metric strong { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.optic-metrics .optic-metric small { text-align: left; }
+
+.optic-facts, .optic-trend, .optic-errors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.optic-fact { display: flex; flex-direction: column; min-width: 0; }
+.optic-fact > span, .optic-spark > span { color: var(--muted); font-size: 12px; }
+.optic-fact strong { font-size: 15px; font-weight: 600; }
+.optic-fact small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.optic-spark { grid-column: span 2; display: flex; flex-direction: column; min-width: 0; }
+.optic-time { color: var(--muted); }
+
+.sparkline { margin: 2px 0 0; }
+.sparkline svg { display: block; width: 100%; height: 36px; }
+.sparkline polyline { stroke-width: 1.6; }
+.sparkline .spark-rx { stroke: var(--accent); }
+.sparkline .spark-tx { stroke: var(--violet); }
+.sparkline figcaption { color: var(--muted); font-size: 11px; }
+.sparkline-empty { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 640px) {
+  .optic-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .optic-spark { grid-column: 1 / -1; }
+}

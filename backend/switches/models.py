@@ -174,6 +174,7 @@ class MuestraOptica(models.Model):
     puerto = models.ForeignKey(Puerto, on_delete=models.CASCADE, related_name='muestras_opticas')
     momento = models.DateTimeField()
     rx_dbm = models.FloatField()
+    tx_dbm = models.FloatField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Muestra óptica"
