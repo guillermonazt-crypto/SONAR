@@ -47,11 +47,11 @@ class SwitchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Switch
         fields = ['id', 'nombre', 'hostname', 'modelo', 'firmware', 'rol', 'plantel', 'plantel_nombre', 'activo',
-                  'ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m',
+                  'ultima_consulta', 'lectura_correcta', 'ultima_lectura_exitosa', 'cpu_5s', 'cpu_1m', 'cpu_5m',
                   'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
                   'uptime_segundos', 'ultimo_reinicio', 'temperatura_c', 'hardware',
                   'poe_presupuesto_w', 'poe_consumo_w', 'estado', 'motivos', 'mantenimiento']
-        read_only_fields = ['ultima_consulta', 'lectura_correcta', 'cpu_5s', 'cpu_1m', 'cpu_5m',
+        read_only_fields = ['ultima_consulta', 'lectura_correcta', 'ultima_lectura_exitosa', 'cpu_5s', 'cpu_1m', 'cpu_5m',
                             'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
                             'uptime_segundos', 'ultimo_reinicio', 'modelo', 'firmware',
                             'temperatura_c', 'hardware', 'poe_presupuesto_w', 'poe_consumo_w']

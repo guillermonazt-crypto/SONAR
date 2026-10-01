@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.core.cache import cache
 from django.db.models import Max, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect
@@ -11,9 +11,11 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from planteles.models import Division, Plantel
-from switches.health import STALE_MINUTES, assess, port_stats, reason_type, summarize_sites, thresholds_by_role
+from switches.health import (STALE_MINUTES, assess, connection_state, in_grace, port_stats, reason_type,
+                             summarize_sites, thresholds_by_role)
 from switches import backups, discovery
-from switches.models import Alerta, Descubierto, Mantenimiento, Puerto, Respaldo, Switch, UmbralOptico
+from switches.models import (Alerta, Descubierto, EstadoMonitoreo, Mantenimiento, Puerto, Respaldo, Switch,
+                             UmbralOptico)
 from usuarios.audit import differences, registrar, snapshot
 from usuarios.models import Bitacora
 from switches.optics import assess_optic, effective_limits, sort_key as optic_sort_key
@@ -87,8 +89,11 @@ def sign_in(request):
 @require_POST
 @csrf_protect
 def sign_out(request):
+    """Cierra la sesión sin cuerpo: ningún dato de la sesión anterior viaja en la respuesta."""
     logout(request)
-    return JsonResponse(dict(user=None, csrfToken=get_token(request)))
+    response = HttpResponse(status=204)
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 @require_GET
@@ -148,13 +153,15 @@ def build_summary(now=None, plantel=None):
     for alert in Alerta.objects.filter(fin__isnull=True, switch__in=switches).order_by('inicio'):
         # Sólo debería haber una abierta por switch; si hubiera más, cuenta la primera.
         alerts.setdefault(alert.switch_id, alert)
+    worker = EstadoMonitoreo.actual()
     items = []
     for switch in switches:
-        level, reasons = assess(switch, stats[switch.pk], thresholds[switch.rol], now)
+        level, reasons = assess(switch, stats[switch.pk], thresholds[switch.rol], now, started=worker.iniciado)
         alert = alerts.get(switch.pk)
         items.append(dict(SwitchSerializer(switch).data,
                           division_nombre=switch.plantel.division.nombre,
                           estado=level, motivos=reasons, puertos=stats[switch.pk],
+                          conexion=connection_state(switch, worker.iniciado, now)[0] if switch.activo else None,
                           alerta=alert and dict(id=alert.pk, desde=alert.inicio.isoformat(),
                                                 reconocida=alert.reconocida_en is not None),
                           historial=histories.get(switch.nombre, [])))
@@ -162,7 +169,11 @@ def build_summary(now=None, plantel=None):
     return dict(
         generado=now.isoformat(),
         ultima_lectura=last.isoformat() if last else None,
-        worker_atrasado=bool(items) and (last is None or (now - last).total_seconds() > STALE_MINUTES * 60),
+        worker_atrasado=bool(items) and not in_grace(worker.iniciado, now) and (
+            last is None or (now - last).total_seconds() > STALE_MINUTES * 60),
+        monitoreo=dict(iniciado=worker.iniciado and worker.iniciado.isoformat(),
+                       latido=worker.latido and worker.latido.isoformat(),
+                       iniciando=in_grace(worker.iniciado, now)),
         umbrales=thresholds,
         historial_detalle=detail,
         planteles=site_summary(switches, items, alerts.values(), now, plantel),

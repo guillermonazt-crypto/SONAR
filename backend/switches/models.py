@@ -32,6 +32,8 @@ class Switch(models.Model):
     creado   = models.DateTimeField(auto_now_add=True)
     ultima_consulta = models.DateTimeField(null=True, blank=True)
     lectura_correcta = models.BooleanField(null=True, default=None)
+    # Sólo avanza con sondeos exitosos: distingue un equipo caído de un monitoreo en pausa.
+    ultima_lectura_exitosa = models.DateTimeField(null=True, blank=True)
     cpu_5s = models.IntegerField(null=True, blank=True)
     cpu_1m = models.IntegerField(null=True, blank=True)
     cpu_5m = models.IntegerField(null=True, blank=True)
@@ -60,6 +62,27 @@ class Switch(models.Model):
 
     def __str__(self):
         return f"{self.nombre} ({self.hostname})"
+
+
+class EstadoMonitoreo(models.Model):
+    """Fila única con el arranque y el último ciclo del worker de sondeo.
+
+    Tras un reinicio del worker, los switches sin lectura nueva quedan en
+    "iniciando" durante health.GRACE_MINUTES en lugar de marcarse caídos.
+    """
+    iniciado = models.DateTimeField(null=True, blank=True)
+    latido = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Estado del monitoreo"
+        verbose_name_plural = "Estado del monitoreo"
+
+    def __str__(self):
+        return f"Worker iniciado {self.iniciado:%Y-%m-%d %H:%M}" if self.iniciado else "Worker sin iniciar"
+
+    @classmethod
+    def actual(cls):
+        return cls.objects.filter(pk=1).first() or cls(pk=1)
 
 
 class Puerto(models.Model):

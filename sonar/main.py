@@ -12,7 +12,7 @@ import time
 from sonar.utils.logger import get_logger
 from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNMP_CONCURRENCY
 from sonar.database.influx_writer import InfluxWriter
-from sonar.database.django_store import record_poll, notify_alerts
+from sonar.database.django_store import mark_worker_started, notify_alerts, record_poll, worker_heartbeat
 from sonar.collector.snmp_collector import obtener_datos_reales
 from sonar.discovery import Scheduler as DiscoveryScheduler
 from sonar.database.django_store import BackupScheduler
@@ -87,6 +87,14 @@ async def ejecutar_ciclo(inventario: list, writer: InfluxWriter) -> None:
                     "Sube SNMP_CONCURRENCY o POLL_INTERVAL_SECONDS.")
 
 
+async def _estado_monitoreo(registrar) -> None:
+    """Arranque y latido del worker en Django; si falla, el sondeo continúa."""
+    try:
+        await asyncio.to_thread(registrar)
+    except Exception:
+        log.exception("No se pudo registrar el estado del monitoreo")
+
+
 async def main() -> None:
     """
     Loop principal de SONAR con switches reales.
@@ -100,6 +108,7 @@ async def main() -> None:
     writer = InfluxWriter()
     discovery = DiscoveryScheduler()
     backups = BackupScheduler()
+    await _estado_monitoreo(mark_worker_started)
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
@@ -110,6 +119,7 @@ async def main() -> None:
                 log.exception("No se pudo recargar el inventario; se omite este ciclo")
             else:
                 await ejecutar_ciclo(inventario, writer)
+                await _estado_monitoreo(worker_heartbeat)
                 # Tareas lentas y opcionales (DISCOVERY_ENABLED / BACKUP_ENABLED).
                 await discovery.maybe_run()
                 await backups.maybe_run()

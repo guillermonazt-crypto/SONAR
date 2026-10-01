@@ -11,6 +11,9 @@ from django.utils import timezone
 from .models import Switch, UmbralRol
 
 STALE_MINUTES = 5
+# Tras arrancar el worker, los switches sin lectura nueva quedan "iniciando" este tiempo.
+GRACE_MINUTES = 2
+CONNECTION_STATES = ('activo', 'iniciando', 'inactivo')
 RECENT_REBOOT_HOURS = 24
 RECENT_ERROR_HOURS = 24
 # Puerto inestable: FLAP_CHANGES o más cambios up/down en la última hora.
@@ -96,6 +99,7 @@ def _reason(level, kind, text):
 # Motivos guardados antes de que existiera 'tipo' (alertas antiguas): se deduce del texto.
 LEGACY_REASON_TYPES = (
     ('No responde', 'snmp'), ('Aún no se ha consultado', 'lectura'), ('Última lectura', 'lectura'),
+    ('Sin lectura', 'lectura'), ('Iniciando', 'iniciando'),
     ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
     ('errores nuevos', 'errores'), ('dañados', 'errores'), ('inestables', 'inestables'),
     ('capacidad', 'saturacion'), ('Óptica SFP', 'optica'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
@@ -122,24 +126,53 @@ def _metric(value, warn, crit, name, kind, reasons):
     return 'ok'
 
 
-def assess(switch, stats, thresholds, now=None):
-    """Devuelve (nivel, motivos) para un switch."""
+def last_success(switch):
+    """Último sondeo exitoso; los registros previos al campo usan la última consulta correcta."""
+    if switch.ultima_lectura_exitosa:
+        return switch.ultima_lectura_exitosa
+    return switch.ultima_consulta if switch.lectura_correcta else None
+
+
+def in_grace(started, now):
+    """True durante los primeros GRACE_MINUTES desde que arrancó el worker."""
+    return started is not None and timedelta(0) <= now - started < timedelta(minutes=GRACE_MINUTES)
+
+
+def connection_state(switch, started, now):
+    """('activo' | 'iniciando' | 'inactivo', motivo o None) de la lectura SNMP de un switch.
+
+    - activo: el último sondeo fue exitoso y ocurrió hace menos de STALE_MINUTES.
+    - iniciando: aún no se consulta, o el worker arrancó hace menos de
+      GRACE_MINUTES (`started`) y su primer sondeo no ha dado lectura.
+    - inactivo: el sondeo falló o no hay lectura exitosa reciente.
+    """
+    ok_at = last_success(switch)
+    fresh = ok_at is not None and now - ok_at < timedelta(minutes=STALE_MINUTES)
+    if switch.lectura_correcta is not False and fresh:
+        return 'activo', None
+    if switch.ultima_consulta is None or in_grace(started, now):
+        return 'iniciando', _reason('warning', 'iniciando', 'Iniciando monitoreo…')
+    if switch.lectura_correcta is False:
+        return 'inactivo', _reason('critical', 'snmp', 'No responde a SNMP')
+    if ok_at is None:
+        return 'inactivo', _reason('critical', 'lectura', 'Sin lecturas exitosas')
+    minutes = (now - ok_at).total_seconds() / 60
+    return 'inactivo', _reason('critical', 'lectura', f'Sin lectura exitosa desde hace {round(minutes)} min')
+
+
+def assess(switch, stats, thresholds, now=None, started=None):
+    """Devuelve (nivel, motivos) para un switch.
+
+    `started` es el arranque del worker (EstadoMonitoreo.iniciado) para el periodo de gracia.
+    """
     now = now or timezone.now()
     reasons = []
     if not switch.activo:
         return 'ok', [_reason('ok', 'inventario', 'Equipo desactivado en inventario')]
-    level = 'ok'
-    if switch.lectura_correcta is False:
-        level = 'critical'
-        reasons.append(_reason('critical', 'snmp', 'No responde a SNMP'))
-    elif switch.ultima_consulta is None:
-        level = 'warning'
-        reasons.append(_reason('warning', 'lectura', 'Aún no se ha consultado'))
-    else:
-        minutes = (now - switch.ultima_consulta).total_seconds() / 60
-        if minutes > STALE_MINUTES:
-            level = 'warning'
-            reasons.append(_reason('warning', 'lectura', f'Última lectura hace {round(minutes)} min'))
+    state, reason = connection_state(switch, started, now)
+    level = {'activo': 'ok', 'iniciando': 'warning', 'inactivo': 'critical'}[state]
+    if reason:
+        reasons.append(reason)
     level = _worst(level, _metric(switch.cpu_5m, thresholds['cpu_atencion'], thresholds['cpu_riesgo'], 'CPU', 'cpu', reasons))
     level = _worst(level, _metric(switch.memoria_usada_pct, thresholds['memoria_atencion'],
                                   thresholds['memoria_riesgo'], 'Memoria', 'memoria', reasons))
@@ -186,6 +219,9 @@ def assess(switch, stats, thresholds, now=None):
         if used >= POE_BUDGET_PCT:
             level = _worst(level, 'warning')
             reasons.append(_reason('warning', 'poe', f'PoE al {round(used)}% del presupuesto ({switch.poe_consumo_w:g} de {switch.poe_presupuesto_w:g} W)'))
+    if state == 'iniciando' and level == 'critical':
+        # Las lecturas son de antes del reinicio: no hay rojo hasta tener una nueva.
+        level = 'warning'
     return level, reasons
 
 
@@ -195,7 +231,7 @@ SITE_PORT_KEYS = ('total', 'up', 'con_errores', 'inestables', 'saturados')
 def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
     """Estado por plantel a partir de los switches ya evaluados con assess().
 
-    `devices`: [{plantel, activo, estado, lectura_correcta, puertos}] (el mismo
+    `devices`: [{plantel, activo, estado, conexion, lectura_correcta, puertos}] (el mismo
     dict que entrega /api/resumen/). El plantel toma el peor nivel de sus equipos
     activos; sin equipos activos queda como 'none'. `open_alerts` es
     {plantel_id: (abiertas, sin_reconocer)} y `maintenance` el conjunto de
@@ -208,7 +244,7 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
         sites[plantel.pk] = dict(
             id=plantel.pk, nombre=plantel.nombre, division=plantel.division.nombre,
             estado='none', equipos=0, inactivos=0, niveles=dict(ok=0, warning=0, critical=0),
-            sin_respuesta=0, puertos={key: 0 for key in SITE_PORT_KEYS},
+            sin_respuesta=0, iniciando=0, puertos={key: 0 for key in SITE_PORT_KEYS},
             alertas_abiertas=open_alerts.get(plantel.pk, (0, 0))[0],
             alertas_sin_reconocer=open_alerts.get(plantel.pk, (0, 0))[1],
             mantenimiento=plantel.pk in maintenance, disponibilidad=None)
@@ -222,7 +258,10 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
         site['equipos'] += 1
         site['niveles'][device['estado']] += 1
         site['estado'] = device['estado'] if site['estado'] == 'none' else _worst(site['estado'], device['estado'])
-        if device['lectura_correcta'] is False:
+        connection = device.get('conexion')
+        if connection == 'iniciando':
+            site['iniciando'] += 1
+        elif connection == 'inactivo' or (connection is None and device['lectura_correcta'] is False):
             site['sin_respuesta'] += 1
         for key in SITE_PORT_KEYS:
             site['puertos'][key] += device['puertos'].get(key, 0)

@@ -16,6 +16,31 @@ def record_poll(dispositivo, datos):
             connections.close_all()
 
 
+def _monitor_state(name):
+    import os
+    # Con inventario YAML el worker no escribe en Django.
+    if os.getenv('INVENTORY_SOURCE', 'django') != 'django':
+        return
+    from sonar.utils.config import setup_django
+    setup_django()
+    from switches import services
+    with _lock:
+        close_old_connections()
+        try:
+            getattr(services, name)()
+        finally:
+            connections.close_all()
+
+
+def mark_worker_started():
+    """Registra el arranque: los switches quedan "iniciando" mientras llega su primer sondeo."""
+    _monitor_state('mark_worker_started')
+
+
+def worker_heartbeat():
+    _monitor_state('worker_heartbeat')
+
+
 def notify_alerts(dispositivo):
     """Evalúa el switch tras el sondeo y envía la alerta fuera del lock de SQLite."""
     if 'django_id' not in dispositivo:

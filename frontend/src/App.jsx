@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { api } from "./api/client";
+import { api, endSession } from "./api/client";
 import Breadcrumb from "./components/Breadcrumb";
 import GlobalSearch from "./components/GlobalSearch";
 import Login from "./components/Login";
@@ -109,11 +109,22 @@ export default function App() {
     connect();
   }, []);
   async function logout() {
+    // Primero se cancela lo pendiente y se vacía la pantalla: nada de la sesión
+    // anterior queda visible mientras el servidor responde. El tema y las
+    // preferencias del menú se conservan; el plantel y la vista no.
+    endSession();
+    setUser(null);
+    setSites([]);
+    setPendingAlerts(0);
+    setFocus(null);
+    setSelection({ device: null, port: null });
+    saveSite("");
+    setPlantelState("");
+    clearView();
+    setView("home");
+    setStatusSegment("sites");
     try {
       await api.logout();
-      setUser(null);
-      clearView();
-      setView("home");
     } catch (e) {
       setError(e.message);
     }

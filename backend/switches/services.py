@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from .interfaces import is_physical_interface
 from .optics import update_baseline
-from .models import EventoPuerto, Switch, Puerto
+from .models import EstadoMonitoreo, EventoPuerto, Switch, Puerto
 
 ERROR_FIELDS = ('errores_entrada', 'errores_salida', 'errores_crc')
 OPTIONAL_FIELDS = ('es_trunk', 'ip_equipo', 'mac_equipo', 'mac_telefono', 'dhcp', 'vlan', 'voice_vlan',
@@ -75,6 +75,18 @@ def new_errors(previous, current):
     return total if known else None
 
 
+def mark_worker_started(now=None):
+    """El worker arrancó: abre el periodo de gracia (health.GRACE_MINUTES)."""
+    now = now or timezone.now()
+    EstadoMonitoreo.objects.update_or_create(pk=1, defaults=dict(iniciado=now, latido=now))
+
+
+def worker_heartbeat(now=None):
+    """Ciclo de sondeo terminado."""
+    now = now or timezone.now()
+    EstadoMonitoreo.objects.update_or_create(pk=1, defaults=dict(latido=now))
+
+
 @transaction.atomic
 def record_poll(switch_id, hostname, datos):
     # Revalidar inventario: pudo cambiar mientras la consulta estaba en vuelo.
@@ -93,6 +105,7 @@ def record_poll(switch_id, hostname, datos):
     )
     Switch.objects.filter(pk=switch.pk).update(
         ultima_consulta=now, lectura_correcta=datos is not None,
+        **({'ultima_lectura_exitosa': now} if datos else {}),
         **{field: datos.get(field) if datos else None for field in (
             'cpu_5s','cpu_1m','cpu_5m','memoria_usada_pct','memoria_total_bytes',
             'memoria_usada_bytes','uptime_segundos')})

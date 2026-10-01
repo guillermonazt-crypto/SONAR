@@ -4,7 +4,7 @@ import { formatRate, formatUptime, timeAgo } from "../utils/format";
 import { useAutoRefresh } from "../utils/refresh";
 import LineChart from "./LineChart";
 import SiteBoard from "./SiteBoard";
-import { LEVELS, REASON_TYPES, StatusBadge, hasReason } from "./Status";
+import { LEVELS, REASON_TYPES, StartingNotice, StatusBadge, hasReason, isOnline } from "./Status";
 import { useViewState } from "../utils/viewState";
 
 const FILTERS = [
@@ -68,7 +68,7 @@ function DeviceCard({ device, limits, onOpenPorts }) {
           <strong>{device.nombre}</strong>
           <small>{device.hostname} · {device.plantel_nombre} · {device.rol}</small>
         </div>
-        <StatusBadge level={device.estado} />
+        <StatusBadge level={device.estado} connection={device.conexion} />
       </header>
       <div className="device-metric-row">
         <Metric label="CPU 5 min" value={device.cpu_5m != null ? `${device.cpu_5m}%` : "—"}
@@ -175,10 +175,11 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
           El worker SNMP no ha escrito lecturas {timeAgo(summary.ultima_lectura)}. Los estados pueden estar desactualizados.
         </p>
       )}
+      <StartingNotice summary={summary} />
       <div className="stats overview-stats">
         <article>
           <span>Salud de la red</span>
-          <strong>{devices.filter((device) => device.lectura_correcta).length}/{devices.length}</strong>
+          <strong>{devices.filter(isOnline).length}/{devices.length}</strong>
           <small>switches con lectura válida</small>
         </article>
         <article>
@@ -216,7 +217,7 @@ export default function Overview({ plantel = "", onPlantelChange = () => {}, onO
           <ul className="risk-list">
             {atRisk.map((device) => (
               <li key={device.id}>
-                <StatusBadge level={device.estado} />
+                <StatusBadge level={device.estado} connection={device.conexion} />
                 <div>
                   <strong>{device.nombre}</strong>
                   <small>{device.plantel_nombre}</small>

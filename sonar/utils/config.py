@@ -124,8 +124,8 @@ def load_inventory() -> list[dict]:
     log.info(f"Inventario cargado: {len(devices)} dispositivos")
     return devices
 
-def load_django_inventory() -> list[dict]:
-    """Lectura ORM en el hilo del worker; no modifica Django."""
+def setup_django() -> None:
+    """Inicializa Django para usar el ORM desde el worker."""
     import sys
     import django
     backend_path = str(ROOT / "backend")
@@ -133,6 +133,11 @@ def load_django_inventory() -> list[dict]:
         sys.path.insert(0, backend_path)
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     django.setup()
+
+
+def load_django_inventory() -> list[dict]:
+    """Lectura ORM en el hilo del worker; no modifica Django."""
+    setup_django()
     from django.db import connections, close_old_connections
     from switches.models import Switch
     close_old_connections()

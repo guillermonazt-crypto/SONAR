@@ -18,7 +18,7 @@ from django.core.mail import send_mail
 from django.utils import timezone
 
 from .health import assess, port_stats, thresholds_by_role
-from .models import Alerta, Mantenimiento, Switch
+from .models import Alerta, EstadoMonitoreo, Mantenimiento, Switch
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,8 @@ def evaluate(switch_id, now=None):
     if switch is None:
         return None
     thresholds = thresholds_by_role()[switch.rol]
-    level, reasons = assess(switch, port_stats([switch.pk], now)[switch.pk], thresholds, now)
+    level, reasons = assess(switch, port_stats([switch.pk], now)[switch.pk], thresholds, now,
+                            started=EstadoMonitoreo.actual().iniciado)
     was_critical = switch.nivel_alerta == 'critical'
     is_critical = level == 'critical'
     open_alerts = list(Alerta.objects.filter(switch=switch, fin__isnull=True).order_by('inicio'))

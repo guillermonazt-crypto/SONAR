@@ -17,7 +17,7 @@ function SiteTile({ site, usage, selected, onSelect }) {
           <strong>{site.nombre}</strong>
           <small>{site.division}</small>
         </span>
-        <StatusBadge level={site.estado} />
+        <StatusBadge level={site.estado} connection={site.iniciando && site.iniciando === site.equipos ? "iniciando" : null} />
       </span>
       <span className="site-tile-levels">
         {plural(site.equipos, "equipo")}

@@ -8,10 +8,11 @@ import {
   within,
 } from "@testing-library/react";
 import App from "./App";
-import { api } from "./api/client";
+import { api, endSession } from "./api/client";
 // Leaflet necesita un navegador real; en las pruebas el mapa es un marcador.
 vi.mock("./components/NocMap", () => ({ default: () => <div data-testid="noc-map" /> }));
 vi.mock("./api/client", () => ({
+  endSession: vi.fn(),
   api: {
     session: vi.fn(),
     login: vi.fn(),
@@ -257,6 +258,32 @@ describe("SONAR", () => {
     unmount();
     render(<App />);
     expect(await screen.findByRole("button", { name: "Expandir menú" })).toHaveAttribute("aria-expanded", "false");
+  });
+  it("al cerrar sesión cancela lo pendiente y no deja datos visibles", async () => {
+    api.session.mockResolvedValue({ user: { username: "reader", rol: "lector", can_edit: false } });
+    api.list.mockImplementation((resource) => Promise.resolve(resource === "planteles" ? [{ id: 2, nombre: "Apan" }] : []));
+    localStorage.setItem("sonar-theme", "light");
+    localStorage.setItem("sonar-sidebar-collapsed", "false");
+    // El servidor tarda en responder: la pantalla se vacía antes.
+    let finish;
+    api.logout.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Estado" }));
+    fireEvent.change(await screen.findByLabelText("Filtrar todo por plantel"), { target: { value: "2" } });
+    expect(localStorage.getItem("sonar-plantel")).toBe("2");
+    fireEvent.click(screen.getByRole("button", { name: "Salir" }));
+    expect(endSession).toHaveBeenCalledTimes(1);
+    expect(await screen.findByLabelText("Usuario")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("Apan")).not.toBeInTheDocument();
+    expect(localStorage.getItem("sonar-plantel")).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem("sonar-view") || "{}")).toEqual({ tab: "home" });
+    // El tema y las preferencias del menú se conservan.
+    expect(localStorage.getItem("sonar-theme")).toBe("light");
+    expect(localStorage.getItem("sonar-sidebar-collapsed")).toBe("false");
+    finish();
+    await waitFor(() => expect(api.logout).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText("Usuario")).toBeInTheDocument();
   });
   it("muestra error y permite reintentar conexión", async () => {
     api.session

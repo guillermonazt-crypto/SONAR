@@ -83,7 +83,8 @@ class SmartAlertTests(TestCase):
         self.assertEqual(Alerta.objects.filter(fin__isnull=True).count(), 1)
         self.assertIsNotNone(Alerta.objects.get(pk=extra.pk).fin)
         # Recuperación: se cierra y se avisa.
-        Switch.objects.filter(pk=self.switch.pk).update(lectura_correcta=True)
+        Switch.objects.filter(pk=self.switch.pk).update(lectura_correcta=True,
+                                                        ultima_lectura_exitosa=self.now + timedelta(minutes=40))
         self.assertTrue(alerts.evaluate(self.switch.pk, self.now + timedelta(minutes=40)).startswith('🟢'))
         self.assertFalse(Alerta.objects.filter(fin__isnull=True).exists())
 

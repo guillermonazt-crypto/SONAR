@@ -13,6 +13,9 @@ const LEVELS = {
 
 function HealthBadge({ device }) {
   if (!device.activo) return <span className="status-badge status-inactive">Inactivo</span>;
+  if (device.conexion === "iniciando" && device.estado !== "critical") {
+    return <span className="status-badge status-warning"><span aria-hidden="true">◌</span> Iniciando monitoreo…</span>;
+  }
   const level = LEVELS[device.estado] ? device.estado : "ok";
   return (
     <span className={`status-badge status-${level}`}>

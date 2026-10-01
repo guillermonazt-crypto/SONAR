@@ -45,7 +45,11 @@ class ApiTests(TestCase):
         self.assertEqual(client.post('/api/switches/',self.payload).status_code,403)
         self.assertEqual(client.post('/api/switches/',self.payload,HTTP_X_CSRFTOKEN=token).status_code,201)
         self.assertEqual(client.post('/api/auth/logout/').status_code,403)
-        self.assertEqual(client.post('/api/auth/logout/',HTTP_X_CSRFTOKEN=token).status_code,200)
+        response = client.post('/api/auth/logout/',HTTP_X_CSRFTOKEN=token)
+        self.assertEqual((response.status_code, response.content), (204, b''))
+        # El token CSRF sigue valiendo para volver a iniciar sesión.
+        self.assertEqual(client.post('/api/auth/login/',creds,HTTP_X_CSRFTOKEN=token).status_code,200)
+        client.post('/api/auth/logout/',HTTP_X_CSRFTOKEN=client.get('/api/auth/session/').json()['csrfToken'])
         self.assertIsNone(client.get('/api/auth/session/').json()['user'])
 
     def test_history_and_zabbix_require_session(self):
@@ -173,7 +177,8 @@ class ApiTests(TestCase):
         self.assertEqual(self.client.get('/api/alertas/resumen/').json(), dict(abiertas=1, sin_reconocer=0))
         self.assertEqual(self.client.get(f'/api/alertas/{alert.pk}/').json()['nota'], 'Cuadrilla en camino')
         # Se recupera: la alerta se cierra.
-        Switch.objects.filter(pk=down.pk).update(lectura_correcta=True)
+        Switch.objects.filter(pk=down.pk).update(lectura_correcta=True, ultima_consulta=now + timedelta(hours=1),
+                                                 ultima_lectura_exitosa=now + timedelta(hours=1))
         alerts.evaluate(down.pk, now + timedelta(hours=1))
         self.assertIsNotNone(Alerta.objects.get().fin)
         self.assertEqual(self.client.get('/api/alertas/?estado=abiertas').json(), [])

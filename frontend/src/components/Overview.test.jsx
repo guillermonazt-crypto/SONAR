@@ -108,6 +108,22 @@ describe("Overview", () => {
     expect(within(again).getByLabelText("Problema")).toHaveValue("cpu");
   });
 
+  it("tras arrancar el worker muestra Iniciando monitoreo en lugar de rojo", async () => {
+    api.summary.mockResolvedValue({
+      generado: now, ultima_lectura: now, worker_atrasado: false, monitoreo: { iniciado: now, iniciando: true },
+      umbrales: { core: limits, distribution: limits, access: limits },
+      switches: [{ ...device(1, "SW-ESPERA", "Apan", "warning", [{ level: "warning", tipo: "iniciando", text: "Iniciando monitoreo…" }]),
+        lectura_correcta: false, conexion: "iniciando" }],
+    });
+    api.zabbix.mockResolvedValue({ configured: false, hosts: [] });
+    render(<Overview />);
+    expect(await screen.findByText(/los estados se confirman con el primer sondeo/)).toBeInTheDocument();
+    const analysis = screen.getByRole("heading", { name: "Estado por equipo" }).closest("section");
+    expect(await within(analysis).findByText("SW-ESPERA")).toBeInTheDocument();
+    expect(within(analysis).getAllByText(/Iniciando monitoreo…/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("En riesgo", { selector: ".status-badge" })).not.toBeInTheDocument();
+  });
+
   it("avisa cuando el worker está atrasado", async () => {
     api.summary.mockResolvedValue({
       generado: now, ultima_lectura: "2026-01-01T00:00:00Z", worker_atrasado: true, umbrales: {}, switches: [],

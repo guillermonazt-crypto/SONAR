@@ -5,6 +5,24 @@ let csrfToken = "";
 // (normalmente un 304 revalidado por ETag), se devuelve el mismo objeto y
 // React no vuelve a pintar la vista.
 const lastGet = new Map();
+// Peticiones de la sesión actual: al cerrar sesión se cancelan todas juntas.
+let session = new AbortController();
+
+function sessionSignal(signal) {
+  if (!signal) return session.signal;
+  if (AbortSignal.any) return AbortSignal.any([signal, session.signal]);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  [signal, session.signal].forEach((item) => (item.aborted ? abort() : item.addEventListener("abort", abort)));
+  return controller.signal;
+}
+
+/** Cancela las peticiones en curso y olvida las respuestas guardadas de la sesión que termina. */
+export function endSession() {
+  session.abort();
+  session = new AbortController();
+  lastGet.clear();
+}
 
 export async function request(
   path,
@@ -17,7 +35,7 @@ export async function request(
     method,
     headers,
     credentials: "same-origin",
-    signal,
+    signal: sessionSignal(signal),
     body: data
       ? form
         ? new URLSearchParams(data)

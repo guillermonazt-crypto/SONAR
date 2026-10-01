@@ -5,6 +5,7 @@ import { siteCoordinates } from "../utils/locations";
 import { setRefreshInterval, useAutoRefresh } from "../utils/refresh";
 import { timeAgo } from "../utils/format";
 import { useTheme } from "../utils/theme";
+import { StartingNotice, isOnline } from "./Status";
 
 // Leaflet sólo se descarga en el NOC.
 const NocMap = lazy(() => import("./NocMap"));
@@ -66,7 +67,7 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
 
   const board = summary?.planteles || [];
   const devices = (summary?.switches || []).filter((device) => device.activo !== false);
-  const online = devices.filter((device) => device.lectura_correcta).length;
+  const online = devices.filter(isOnline).length;
   const availability = devices.length ? Math.round((online * 1000) / devices.length) / 10 : null;
   const openAlerts = board.reduce((sum, site) => sum + (site.alertas_abiertas || 0), 0);
   const pending = board.reduce((sum, site) => sum + (site.alertas_sin_reconocer || 0), 0);
@@ -124,6 +125,7 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
       {summary?.worker_atrasado && (
         <p role="alert" className="worker-alert">El worker SNMP no ha escrito lecturas {timeAgo(summary.ultima_lectura)}. Los estados pueden estar desactualizados.</p>
       )}
+      <StartingNotice summary={summary} />
       {incidents.length > 0 && (
         <div className="noc-incidents" role="alert" aria-live="assertive">
           {incidents.map((item) => (
