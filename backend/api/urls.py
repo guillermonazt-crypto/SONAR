@@ -13,6 +13,7 @@ urlpatterns = [path('auth/session/', views.session), path('auth/login/', views.s
                path('auth/logout/', views.sign_out), path('integrations/zabbix/', views.zabbix),
                path('puertos/<int:pk>/historial/', views.port_history),
                path('switches/<int:pk>/historial/', views.switch_history),
+               path('switches/<int:pk>/sintetico/', views.synthetic_history),
                path('resumen/', views.summary),
                path('monitoreo/', views.monitoring),
                path('buscar/', views.search),

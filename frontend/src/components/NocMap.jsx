@@ -96,7 +96,12 @@ export default function NocMap({ points, theme = "dark", onSelect }) {
         fillColor: color,
         fillOpacity: 1,
       })
-        .bindTooltip(`<strong>${point.nombre}</strong><br/>${LEVEL_TEXT[point.estado] || ""}${point.equipos ? ` · ${point.equipos} switches` : ""}`, { direction: "top", offset: [0, -8] })
+        .bindTooltip(
+          `<strong>${point.nombre}</strong><br/>${LEVEL_TEXT[point.estado] || ""}${point.equipos ? ` · ${point.equipos} switches` : ""}` +
+            (point.puntaje != null ? `<br/>Puntaje ${point.puntaje}${point.detalle ? `: ${point.detalle}` : ""}` : "") +
+            (point.latencia_ms != null ? `<br/>Latencia ${point.latencia_ms} ms · pérdida ${point.perdida_pct ?? 0}%` : ""),
+          { direction: "top", offset: [0, -8] },
+        )
         .on("click", () => selectRef.current?.(point.id))
         .addTo(layer.current);
     });

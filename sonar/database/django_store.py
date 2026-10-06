@@ -16,6 +16,21 @@ def record_poll(dispositivo, datos, verificacion=None):
             connections.close_all()
 
 
+def record_synthetic(results):
+    """Guarda la última prueba sintética de cada switch del inventario Django."""
+    rows = [(item['dispositivo']['django_id'], item['resultado'])
+            for item in results if 'django_id' in item['dispositivo']]
+    if not rows:
+        return
+    from switches.services import record_synthetic as save
+    with _lock:
+        close_old_connections()
+        try:
+            save(rows)
+        finally:
+            connections.close_all()
+
+
 def _monitor_state(name, **kwargs):
     import os
     # Con inventario YAML el worker no escribe en Django.

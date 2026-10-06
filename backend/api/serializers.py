@@ -51,12 +51,14 @@ class SwitchSerializer(serializers.ModelSerializer):
                   'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
                   'uptime_segundos', 'ultimo_reinicio', 'temperatura_c', 'hardware',
                   'poe_presupuesto_w', 'poe_consumo_w', 'fallos_consecutivos', 'metodos_fallidos', 'verificacion',
+                  'latencia_ms', 'jitter_ms', 'perdida_pct', 'sintetico_en',
                   'estado', 'motivos', 'mantenimiento']
         read_only_fields = ['ultima_consulta', 'lectura_correcta', 'ultima_lectura_exitosa', 'cpu_5s', 'cpu_1m', 'cpu_5m',
                             'memoria_usada_pct', 'memoria_total_bytes', 'memoria_usada_bytes',
                             'uptime_segundos', 'ultimo_reinicio', 'modelo', 'firmware',
                             'temperatura_c', 'hardware', 'poe_presupuesto_w', 'poe_consumo_w',
-                            'fallos_consecutivos', 'metodos_fallidos', 'verificacion']
+                            'fallos_consecutivos', 'metodos_fallidos', 'verificacion',
+                            'latencia_ms', 'jitter_ms', 'perdida_pct', 'sintetico_en']
 
 class PuertoSerializer(serializers.ModelSerializer):
     class Meta:

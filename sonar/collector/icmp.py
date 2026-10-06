@@ -19,12 +19,13 @@ PING_TIMEOUT_MS = int(os.getenv("PING_TIMEOUT_MS", "1000"))
 PING_COUNT = int(os.getenv("PING_COUNT", "2"))
 
 
-def ping_command(host: str, windows: bool | None = None) -> list[str]:
-    """Comando ping del sistema con PING_COUNT intentos y PING_TIMEOUT_MS por respuesta."""
+def ping_command(host: str, windows: bool | None = None, count: int | None = None) -> list[str]:
+    """Comando ping del sistema con `count` (PING_COUNT) intentos y PING_TIMEOUT_MS por respuesta."""
     windows = sys.platform.startswith("win") if windows is None else windows
+    count = PING_COUNT if count is None else count
     if windows:
-        return ["ping", "-n", str(PING_COUNT), "-w", str(PING_TIMEOUT_MS), host]
-    return ["ping", "-c", str(PING_COUNT), "-W", str(max(1, PING_TIMEOUT_MS // 1000)), host]
+        return ["ping", "-n", str(count), "-w", str(PING_TIMEOUT_MS), host]
+    return ["ping", "-c", str(count), "-W", str(max(1, PING_TIMEOUT_MS // 1000)), host]
 
 
 def ping_succeeded(returncode: int, output: str) -> bool:

@@ -14,6 +14,22 @@ const NOC_REFRESH = [3, 10, 30];
 const LEVEL_TEXT = { critical: "Crítico", warning: "Atención", ok: "Sano", none: "Sin equipos" };
 const ORDER = { critical: 0, warning: 1, ok: 2, none: 3 };
 
+/** Semáforo del plantel por severidad ponderada (puertos 0.5, lento 1, caído 3, crítico 5). */
+export const siteLevel = (site) => site.estado_ponderado || site.estado;
+
+/** "3 caídos · 1 lento · 4 puertos": qué suma el puntaje del plantel. */
+export function scoreDetail(site) {
+  const parts = [
+    ["critico", "crítico", "críticos"],
+    ["caido", "caído", "caídos"],
+    ["lento", "lento", "lentos"],
+    ["puerto", "puerto", "puertos"],
+  ]
+    .filter(([key]) => site.desglose?.[key])
+    .map(([key, one, many]) => `${site.desglose[key]} ${site.desglose[key] === 1 ? one : many}`);
+  return parts.join(" · ");
+}
+
 function Kpi({ label, value, detail, tone = "" }) {
   return (
     <article className={`noc-kpi${tone ? ` tone-${tone}` : ""}`}>
@@ -71,8 +87,8 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
   const availability = devices.length ? Math.round((online * 1000) / devices.length) / 10 : null;
   const openAlerts = board.reduce((sum, site) => sum + (site.alertas_abiertas || 0), 0);
   const pending = board.reduce((sum, site) => sum + (site.alertas_sin_reconocer || 0), 0);
-  const count = (level) => board.filter((site) => site.estado === level).length;
-  const critical = board.filter((site) => site.estado === "critical");
+  const count = (level) => board.filter((site) => siteLevel(site) === level).length;
+  const critical = board.filter((site) => siteLevel(site) === "critical");
 
   // Ubicación: la del administrador (planteles) o la tabla conocida; los repetidos se separan un poco.
   const points = useMemo(() => {
@@ -85,11 +101,11 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
         const key = coords.join(",");
         const repeat = seen.get(key) || 0;
         seen.set(key, repeat + 1);
-        return { ...site, coords: [coords[0] + repeat * 0.012, coords[1] + repeat * 0.012] };
+        return { ...site, estado: siteLevel(site), detalle: scoreDetail(site), coords: [coords[0] + repeat * 0.012, coords[1] + repeat * 0.012] };
       })
       .filter(Boolean);
   }, [board, sites]);
-  const ordered = [...board].sort((a, b) => ORDER[a.estado] - ORDER[b.estado] || a.nombre.localeCompare(b.nombre));
+  const ordered = [...board].sort((a, b) => ORDER[siteLevel(a)] - ORDER[siteLevel(b)] || (b.puntaje || 0) - (a.puntaje || 0) || a.nombre.localeCompare(b.nombre));
 
   function toggleSound() {
     const next = !sound;
@@ -150,7 +166,7 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
             <span className="level-count"><i className="dot dot-warning" />{count("warning")}</span>
             <span className="level-count"><i className="dot dot-ok" />{count("ok")}</span>
           </div>
-          <small>crítico · atención · sano</small>
+          <small>crítico &gt; 15 · atención 5–15 · sano &lt; 5 pts</small>
         </article>
       </div>
 
@@ -173,11 +189,12 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
             <ul className="noc-site-list">
               {ordered.map((site) => (
                 <li key={site.id}>
-                  <button type="button" className={`noc-site site-${site.estado}`} onClick={() => onOpenSite(site.id)} aria-label={`${site.nombre}: ${LEVEL_TEXT[site.estado]}`}>
-                    <i className={`dot dot-${site.estado}`} aria-hidden="true" />
+                  <button type="button" className={`noc-site site-${siteLevel(site)}`} onClick={() => onOpenSite(site.id)} aria-label={`${site.nombre}: ${LEVEL_TEXT[siteLevel(site)]}`} title={scoreDetail(site) || undefined}>
+                    <i className={`dot dot-${siteLevel(site)}`} aria-hidden="true" />
                     <span className="noc-site-name">{site.nombre}</span>
                     <span className="noc-site-meta">
                       {site.alertas_abiertas > 0 ? `${site.alertas_abiertas} alerta${site.alertas_abiertas === 1 ? "" : "s"}` : site.equipos ? `${site.disponibilidad}%` : "—"}
+                      {site.puntaje > 0 && ` · ${site.puntaje} pts`}
                     </span>
                   </button>
                 </li>

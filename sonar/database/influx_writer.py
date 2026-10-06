@@ -221,6 +221,30 @@ class InfluxWriter:
         log.info(f"[{datos['nombre']}] "
                  f"{len(transceptores)} transceptores escritos en InfluxDB")
 
+    def escribir_sintetico(self, resultados: list) -> None:
+        """Escribe las pruebas sintéticas (ping): latencia, jitter y pérdida por equipo."""
+        ahora = datetime.now(timezone.utc)
+        puntos = []
+        for item in resultados:
+            device, result = item["dispositivo"], item["resultado"]
+            punto = (
+                Point("sintetico")
+                .tag("device", device.get("name", device["hostname"]))
+                .tag("role",   device.get("role", "access"))
+                .tag("site",   device.get("site", ""))
+                .tag("target", device["hostname"])
+                .field("alcanzable", 1 if result["alcanzable"] else 0)
+                .field("enviados", result["enviados"])
+                .field("recibidos", result["recibidos"])
+                .time(ahora, WritePrecision.S)
+            )
+            for field in ("perdida_pct", "rtt_min_ms", "rtt_avg_ms", "rtt_max_ms", "jitter_ms"):
+                if result.get(field) is not None:
+                    punto.field(field, float(result[field]))
+            puntos.append(punto)
+        if puntos:
+            self._write(puntos)
+
     def cerrar(self) -> None:
         """
         Cierra la conexion con InfluxDB limpiamente.

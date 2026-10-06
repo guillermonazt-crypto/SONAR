@@ -131,6 +131,26 @@ def switch_history(request, pk=None):
 
 @require_GET
 @requires_session
+def synthetic_history(request, pk=None):
+    """Tendencia de latencia, jitter y pérdida del monitoreo sintético (?horas=24, máximo 7 días)."""
+    switch = Switch.objects.filter(pk=pk).first()
+    if switch is None:
+        return JsonResponse({'points': []}, status=404)
+    try:
+        hours = min(max(int(request.GET.get('horas', 24)), 1), 168)
+    except ValueError:
+        hours = 24
+    latest = dict(latencia_ms=switch.latencia_ms, jitter_ms=switch.jitter_ms, perdida_pct=switch.perdida_pct,
+                  momento=switch.sintetico_en and switch.sintetico_en.isoformat())
+    try:
+        points = history.synthetic_history(switch.nombre, hours=hours, every='5m' if hours <= 24 else '1h')
+    except Exception as error:
+        return JsonResponse({'ultima': latest, 'points': [], 'detail': f'Histórico no disponible: {error}'})
+    return JsonResponse({'ultima': latest, 'points': points})
+
+
+@require_GET
+@requires_session
 def search(request):
     """Buscador global por MAC, IP, descripción de puerto o switch."""
     return JsonResponse(search_devices(request.GET.get('q', ''), site_id(request.GET)))

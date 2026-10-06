@@ -38,6 +38,14 @@ function SiteTile({ site, usage, selected, onSelect }) {
           <span className={usage?.mem >= 85 ? "status-warning-text" : ""}>
             <small>Memoria</small><b>{usage?.mem != null ? `${usage.mem}%` : "—"}</b>
           </span>
+          {site.puntaje != null && (
+            <span className={`status-${site.estado_ponderado}-text`} title="Puertos 0.5 · lento 1 · caído 3 · crítico 5 (verde < 5, rojo > 15)">
+              <small>Puntaje</small><b>{site.puntaje}</b>
+            </span>
+          )}
+          <span className={site.perdida_pct > 0 ? "status-warning-text" : ""} title={site.perdida_pct != null ? `Pérdida máxima ${site.perdida_pct}%` : undefined}>
+            <small>Latencia</small><b>{site.latencia_ms != null ? `${site.latencia_ms} ms` : "—"}</b>
+          </span>
         </span>
       )}
       {site.mantenimiento && <span className="status-badge status-maintenance">En mantenimiento</span>}

@@ -7,8 +7,10 @@ from datetime import timedelta
 
 from django.db.models import Count, Q
 from django.utils import timezone
+import os
 
 from .models import Switch, UmbralRol
+from .scoring import site_score
 
 STALE_MINUTES = 5
 # Tras arrancar el worker, los switches sin lectura nueva quedan "iniciando" este tiempo.
@@ -30,6 +32,11 @@ DEFAULTS = dict(cpu_atencion=70, cpu_riesgo=90, memoria_atencion=80, memoria_rie
 ROLE_DEFAULTS = {'core': dict(escalar_minutos=15), 'distribution': dict(escalar_minutos=30),
                  'access': dict(escalar_minutos=60)}
 THRESHOLD_FIELDS = tuple(DEFAULTS)
+# Monitoreo sintético: latencia promedio o pérdida a partir de la cual el equipo cuenta como lento.
+SYNTHETIC_LATENCY_MS = float(os.getenv('SYNTHETIC_LATENCY_MS', '100'))
+SYNTHETIC_LOSS_PCT = float(os.getenv('SYNTHETIC_LOSS_PCT', '20'))
+# Una medición más vieja que esto ya no describe al equipo (3 intervalos de 15 min).
+SYNTHETIC_STALE = timedelta(minutes=45)
 
 
 def thresholds_by_role():
@@ -100,7 +107,7 @@ def _reason(level, kind, text):
 LEGACY_REASON_TYPES = (
     ('No responde', 'snmp'), ('Aún no se ha consultado', 'lectura'), ('Última lectura', 'lectura'),
     ('Sin lectura', 'lectura'), ('Iniciando', 'iniciando'), ('se confirma en el siguiente', 'verificando'),
-    ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
+    ('CPU ', 'cpu'), ('Memoria ', 'memoria'), ('Latencia', 'latencia'), ('Pérdida', 'latencia'), ('Reinicio', 'reinicio'), ('PoE ', 'poe'),
     ('errores nuevos', 'errores'), ('dañados', 'errores'), ('inestables', 'inestables'),
     ('capacidad', 'saturacion'), ('Óptica SFP', 'optica'), ('Sensor', 'hardware'), ('Ventilador', 'hardware'), ('Fuente', 'hardware'),
 )
@@ -265,10 +272,30 @@ def assess(switch, stats, thresholds, now=None, started=None):
         if used >= POE_BUDGET_PCT:
             level = _worst(level, 'warning')
             reasons.append(_reason('warning', 'poe', f'PoE al {round(used)}% del presupuesto ({switch.poe_consumo_w:g} de {switch.poe_presupuesto_w:g} W)'))
+    for reason in synthetic_reasons(switch, now):
+        level = _worst(level, reason['level'])
+        reasons.append(reason)
     if state == 'iniciando' and level == 'critical':
         # Las lecturas son de antes del reinicio: no hay rojo hasta tener una nueva.
         level = 'warning'
     return level, reasons
+
+
+def synthetic_reasons(switch, now):
+    """Motivos 'latencia' por la última prueba sintética reciente (sólo si el equipo responde algo)."""
+    measured = getattr(switch, 'sintetico_en', None)
+    if measured is None or now - measured > SYNTHETIC_STALE:
+        return []
+    loss, latency = switch.perdida_pct, switch.latencia_ms
+    # 100% de pérdida es un equipo caído: lo reporta la validación SNMP + ping, no esta regla.
+    if loss is None or loss >= 100:
+        return []
+    reasons = []
+    if latency is not None and latency >= SYNTHETIC_LATENCY_MS:
+        reasons.append(_reason('warning', 'latencia', f'Latencia de {latency:g} ms (≥ {SYNTHETIC_LATENCY_MS:g} ms)'))
+    if loss >= SYNTHETIC_LOSS_PCT:
+        reasons.append(_reason('warning', 'latencia', f'Pérdida de paquetes del {loss:g}% (≥ {SYNTHETIC_LOSS_PCT:g}%)'))
+    return reasons
 
 
 SITE_PORT_KEYS = ('total', 'up', 'con_errores', 'inestables', 'saturados')
@@ -293,7 +320,8 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
             sin_respuesta=0, iniciando=0, puertos={key: 0 for key in SITE_PORT_KEYS},
             alertas_abiertas=open_alerts.get(plantel.pk, (0, 0))[0],
             alertas_sin_reconocer=open_alerts.get(plantel.pk, (0, 0))[1],
-            mantenimiento=plantel.pk in maintenance, disponibilidad=None)
+            mantenimiento=plantel.pk in maintenance, disponibilidad=None, latencia_ms=None, perdida_pct=None)
+    members = {pk: [] for pk in sites}
     for device in devices:
         site = sites.get(device['plantel'])
         if site is None:
@@ -302,6 +330,7 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
             site['inactivos'] += 1
             continue
         site['equipos'] += 1
+        members[device['plantel']].append(device)
         site['niveles'][device['estado']] += 1
         site['estado'] = device['estado'] if site['estado'] == 'none' else _worst(site['estado'], device['estado'])
         connection = device.get('conexion')
@@ -315,5 +344,15 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
         if site['equipos']:
             # Equipos que responden a SNMP en este momento.
             site['disponibilidad'] = round((site['equipos'] - site['sin_respuesta']) * 100 / site['equipos'], 1)
+        # Severidad ponderada (switches/scoring.py): el semáforo del mapa usa 'estado_ponderado';
+        # 'estado' sigue siendo el peor equipo, para avisos y listas.
+        weighted = site_score(members[site['id']])
+        site.update(puntaje=weighted['puntaje'], estado_ponderado=weighted['estado'], desglose=weighted['desglose'])
+        latencies = [d['latencia_ms'] for d in members[site['id']] if d.get('latencia_ms') is not None]
+        losses = [d['perdida_pct'] for d in members[site['id']] if d.get('perdida_pct') is not None]
+        if latencies:
+            site['latencia_ms'] = round(sum(latencies) / len(latencies), 1)
+        if losses:
+            site['perdida_pct'] = max(losses)
     order = {'critical': 0, 'warning': 1, 'ok': 2, 'none': 3}
     return sorted(sites.values(), key=lambda site: (order[site['estado']], site['nombre']))

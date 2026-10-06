@@ -59,6 +59,11 @@ class Switch(models.Model):
     fallos_consecutivos = models.PositiveIntegerField(default=0)
     metodos_fallidos = models.JSONField(default=list, blank=True)
     verificacion = models.JSONField(null=True, blank=True)
+    # Monitoreo sintético (ping del worker cada SYNTHETIC_INTERVAL_MINUTES): última medición.
+    latencia_ms = models.FloatField(null=True, blank=True)
+    jitter_ms = models.FloatField(null=True, blank=True)
+    perdida_pct = models.FloatField(null=True, blank=True)
+    sintetico_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Switch"

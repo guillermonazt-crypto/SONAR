@@ -97,6 +97,29 @@ def port_history(switch_name, port_name, hours=24):
     return sorted(points, key=lambda point: point['time'])
 
 
+SYNTHETIC_FIELDS = ('rtt_avg_ms', 'rtt_max_ms', 'jitter_ms', 'perdida_pct')
+
+
+def synthetic_history(switch_name, hours=24, every='15m'):
+    """Tendencia del monitoreo sintético: [{time, rtt_avg_ms, rtt_max_ms, jitter_ms, perdida_pct}]."""
+    url, token, org, bucket = influx_settings()
+    fields = ' or '.join(f'r._field == "{field}"' for field in SYNTHETIC_FIELDS)
+    flux = f'''from(bucket: "{flux_string(bucket)}")
+  |> range(start: -{int(hours)}h)
+  |> filter(fn: (r) => r._measurement == "sintetico" and r.device == "{flux_string(switch_name)}")
+  |> filter(fn: (r) => {fields})
+  |> group(columns: ["_field"])
+  |> sort(columns: ["_time"])
+  |> aggregateWindow(every: {every}, fn: mean, createEmpty: false)
+  |> group()
+  |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")'''
+    with InfluxDBClient(url=url, token=token, org=org) as client:
+        rows = client.query_api().query(flux, org=org)
+    points = [dict(time=record.get_time().isoformat(), **{field: record.values.get(field) for field in SYNTHETIC_FIELDS})
+              for table in rows for record in table.records]
+    return sorted(points, key=lambda point: point['time'])
+
+
 def trend_buckets():
     """Buckets a intentar para tendencias de días: el de largo plazo primero.
 

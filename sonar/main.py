@@ -14,10 +14,12 @@ from functools import partial
 from sonar.utils.logger import get_logger
 from sonar.utils.config import load_inventory, validate_snmp, POLL_INTERVAL, SNMP_CONCURRENCY
 from sonar.database.influx_writer import InfluxWriter
-from sonar.database.django_store import mark_worker_started, notify_alerts, record_poll, worker_heartbeat
+from sonar.database.django_store import (mark_worker_started, notify_alerts, record_poll, record_synthetic,
+                                         worker_heartbeat)
 from sonar.collector.snmp_collector import obtener_datos_reales
 from sonar.collector.icmp import ping
 from sonar.discovery import Scheduler as DiscoveryScheduler
+from sonar.synthetic import Scheduler as SyntheticScheduler
 from sonar.database.django_store import BackupScheduler
 
 log = get_logger(__name__)
@@ -131,6 +133,18 @@ async def _latidos(writer: InfluxWriter) -> None:
         await asyncio.sleep(HEARTBEAT_SECONDS)
 
 
+async def _sintetico(writer: InfluxWriter, scheduler=None, inventory=load_inventory, pause=60) -> None:
+    """Monitoreo sintético (ping, latencia, pérdida) en su propio ritmo, sin alargar el ciclo SNMP."""
+    scheduler = scheduler or SyntheticScheduler()
+    while True:
+        try:
+            inventario = await asyncio.to_thread(inventory)
+            await scheduler.maybe_run(inventario, writer, record_synthetic)
+        except Exception:
+            log.exception("El monitoreo sintético falló; se reintenta en el siguiente intervalo")
+        await asyncio.sleep(pause)
+
+
 async def main() -> None:
     """
     Loop principal de SONAR con switches reales.
@@ -146,6 +160,7 @@ async def main() -> None:
     backups = BackupScheduler()
     await _estado_monitoreo(mark_worker_started)
     latidos = asyncio.create_task(_latidos(writer))
+    sintetico = asyncio.create_task(_sintetico(writer))
     log.info("SONAR activo. Presiona Ctrl+C para detener.\n")
 
     try:
@@ -168,6 +183,7 @@ async def main() -> None:
 
     finally:
         latidos.cancel()
+        sintetico.cancel()
         await asyncio.to_thread(writer.cerrar)
         log.info("Hasta luego.")
 

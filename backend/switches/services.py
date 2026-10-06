@@ -181,6 +181,15 @@ def neighbor_view(switch, now):
     return 'up' in states
 
 
+def record_synthetic(rows, now=None):
+    """Guarda la última prueba sintética: [(switch_id, {rtt_avg_ms, jitter_ms, perdida_pct, ...})]."""
+    now = now or timezone.now()
+    for switch_id, result in rows:
+        Switch.objects.filter(pk=switch_id, activo=True).update(
+            latencia_ms=result.get('rtt_avg_ms'), jitter_ms=result.get('jitter_ms'),
+            perdida_pct=result.get('perdida_pct'), sintetico_en=now)
+
+
 def verify_failure(switch, verificacion, now):
     """Resultado por método tras un sondeo SNMP fallido y lista de métodos que fallaron."""
     result = dict(snmp=False, icmp=(verificacion or {}).get('icmp'), vecinos=neighbor_view(switch, now))

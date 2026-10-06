@@ -162,6 +162,22 @@ CISCO-ENVMON-MIB), el PoE al 90 % o más del presupuesto, los puertos inestables
 El API responde `304 Not Modified` (ETag) cuando nada cambió, así el refresco cada
 3 s casi no transfiere datos.
 
+## Monitoreo sintético y severidad ponderada
+
+El worker hace ping (`SYNTHETIC_PING_COUNT` paquetes) cada `SYNTHETIC_INTERVAL_MINUTES`
+a los equipos de `SYNTHETIC_ROLES`, aparte del ciclo SNMP. Guarda latencia
+mín/prom/máx, jitter y pérdida en InfluxDB (measurement `sintetico`) y la última
+medición en Django. `GET /api/switches/<id>/sintetico/?horas=24` entrega la tendencia.
+Latencia ≥ `SYNTHETIC_LATENCY_MS` o pérdida ≥ `SYNTHETIC_LOSS_PCT` agrega el motivo
+"latencia" al switch.
+
+El semáforo de cada plantel en el mapa del NOC suma la severidad de sus equipos
+activos (`backend/switches/scoring.py`): puerto con errores, inestable o PoE en falla
+0.5; equipo lento (latencia, pérdida, CPU o memoria) 1; equipo caído 3; condición
+crítica (hardware, óptica, falla generalizada…) 5. Verde < 5, amarillo 5–15 y rojo
+> 15. `/api/resumen/` lo entrega como `puntaje`, `estado_ponderado` y `desglose`;
+`estado` sigue siendo el peor equipo y es el que dispara la alarma de "plantel en rojo".
+
 ## Descubrimiento y respaldos (opcionales)
 
 Ambos están apagados por defecto; las variables están en `.env.example`.
