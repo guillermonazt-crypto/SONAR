@@ -83,6 +83,10 @@ export const api = {
   portHistory: (id) => request(`puertos/${id}/historial/`),
   switchHistory: (id) => request(`switches/${id}/historial/`),
   monitoring: () => request("monitoreo/"),
+  // Zabbix en tiempo real (opcional): problemas, disponibilidad y últimos valores.
+  live: (plantel = "") => request(`vivo/${queryString({ plantel })}`),
+  liveSwitch: (id) => request(`vivo/switches/${id}/`),
+  liveAcknowledge: (eventid, data) => request(`vivo/problemas/${eventid}/reconocer/`, { method: "POST", data }),
   summary: (refresh = false, plantel = "") => request(`resumen/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
   optics: (refresh = false, plantel = "") => request(`opticas/${queryString({ refresh: refresh ? "1" : "", plantel })}`),
   search: (query, plantel = "") => request(`buscar/${queryString({ q: query, plantel })}`),

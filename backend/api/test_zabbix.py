@@ -251,7 +251,8 @@ class ZabbixHistoryTests(TestCase):
         def history(params):
             rows = {'0': [dict(itemid='4', clock=str(NOW - 1000), value='10'), dict(itemid='4', clock=str(NOW - 900), value='30')],
                     '3': [dict(itemid='7', clock=str(NOW - 1000), value='8000'), dict(itemid='8', clock=str(NOW - 1000), value='2000'),
-                          dict(itemid='10', clock=str(NOW - 1000), value='999999')]}
+                          dict(itemid='10', clock=str(NOW - 1000), value='999999'),
+                          dict(itemid='7', clock=str(NOW - 820), value='4000'), dict(itemid='8', clock=str(NOW - 820), value='1000')]}
             return [row for row in rows[str(params['history'])] if row['itemid'] in params['itemids']]
         return fake(**{'history.get': history})
 
@@ -261,9 +262,8 @@ class ZabbixHistoryTests(TestCase):
         with mock.patch('api.zabbix.urlopen', server), mock.patch('api.zabbix.time.time', return_value=NOW):
             data = self.client.get(f'/api/puertos/{self.port.pk}/historial/').json()
         self.assertEqual(data['fuente'], 'zabbix')
-        self.assertEqual(data['unidad'], 'bps')
-        self.assertEqual(len(data['points']), 1)
-        self.assertEqual((data['points'][0]['entrada_bps'], data['points'][0]['salida_bps']), (8000.0, 2000.0))
+        self.assertEqual([(p['entrada'], p['salida']) for p in data['points']], [(0, 0), (180_000, 45_000)])
+        self.assertEqual((data['points'][1]['entrada_bps'], data['points'][1]['salida_bps']), (4000.0, 1000.0))
         self.assertIn('influx caído', data['detail'])
 
     @mock.patch('api.history.switch_histories', side_effect=RuntimeError('influx caído'))
@@ -272,7 +272,7 @@ class ZabbixHistoryTests(TestCase):
             data = self.client.get(f'/api/switches/{self.switch.pk}/historial/').json()
         self.assertEqual(data['fuente'], 'zabbix')
         point = data['points'][0]
-        self.assertEqual((point['cpu'], point['entrada_bps'], point['salida_bps']), (20.0, 8000.0, 2000.0))
+        self.assertEqual((point['cpu'], point['entrada_bps'], point['salida_bps']), (20.0, 6000.0, 1500.0))
 
     @mock.patch('api.history.switch_histories', return_value={'SW-APAN-1': [dict(time='t', cpu=1)]})
     def test_influx_first_in_auto_mode(self, _influx):

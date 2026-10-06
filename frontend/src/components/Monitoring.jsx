@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAutoRefresh } from "../utils/refresh";
 import { loadView, saveView } from "../utils/viewState";
+import { SwitchLive } from "./LivePanel";
 import PortPanel from "./PortPanel";
 
 // Mismo nivel verde/amarillo/rojo que Resumen: lo calcula switches/health.py.
@@ -210,7 +211,7 @@ export default function Monitoring({ plantel = "", focus = null, onFocusHandled 
           ))}
         </div>
       )}
-      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} refreshing={ports.refreshing} failed={ports.failed} onRetry={() => showPorts(ports.device)} onClose={closePorts} onPortChange={onPortChange} />}
+      {ports && <PortPanel key={panelKey} device={panelDevice} items={ports.items} loading={ports.loading} refreshing={ports.refreshing} failed={ports.failed} onRetry={() => showPorts(ports.device)} onClose={closePorts} onPortChange={onPortChange} extra={<SwitchLive device={panelDevice} />} />}
     </>
   );
 }

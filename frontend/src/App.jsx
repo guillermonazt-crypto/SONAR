@@ -7,6 +7,7 @@ import RefreshControl from "./components/RefreshControl";
 import Sidebar, { SECTIONS } from "./components/Sidebar";
 import WorkerBanner from "./components/WorkerBanner";
 import { usePref } from "./utils/prefs";
+import { installBackClose } from "./utils/backClose";
 import { useAutoRefresh, useRefreshInterval } from "./utils/refresh";
 import { loadSite, saveSite } from "./utils/site";
 import { setTheme, useTheme } from "./utils/theme";
@@ -78,6 +79,8 @@ export default function App() {
   }, [user]);
   useAutoRefresh(loadAlerts, Boolean(user));
 
+  // Celular: Atrás cierra la hoja abierta antes de salir de SONAR.
+  useEffect(() => (user ? installBackClose() : undefined), [user]);
   useEffect(() => saveView("tab", view), [view]);
   useEffect(() => saveView("status-segment", statusSegment), [statusSegment]);
 
@@ -172,6 +175,8 @@ export default function App() {
         pendingAlerts={pendingAlerts}
         user={user}
         onLogout={logout}
+        theme={theme}
+        onTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       />
       <main className="content">
         <header className="topbar">

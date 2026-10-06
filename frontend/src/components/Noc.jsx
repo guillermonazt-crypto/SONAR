@@ -5,6 +5,7 @@ import { siteCoordinates } from "../utils/locations";
 import { setRefreshInterval, useAutoRefresh } from "../utils/refresh";
 import { timeAgo } from "../utils/format";
 import { useTheme } from "../utils/theme";
+import LivePanel from "./LivePanel";
 import { StartingNotice, isOnline } from "./Status";
 
 // Leaflet sólo se descarga en el NOC.
@@ -203,6 +204,7 @@ export default function Noc({ sites = [], onOpenSite = () => {}, refreshSeconds,
           )}
         </section>
       </div>
+      <LivePanel limit={8} />
     </div>
   );
 }

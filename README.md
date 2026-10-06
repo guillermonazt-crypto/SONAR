@@ -215,6 +215,15 @@ credenciales anteriores: cámbialas en la interfaz de InfluxDB.
 token de sólo lectura para Django (`INFLUX_READ_TOKEN`). `--raw-retention-days 14`
 reduce la retención del bucket crudo y **borra** los datos más antiguos.
 
+## SONAR en el celular
+
+Hasta 768 px de ancho toda la app se adapta: barra inferior (Inicio, Estado,
+Alertas, Red y Más), encabezado compacto, mapa a todo lo ancho, tablas con
+desplazamiento horizontal y el detalle de switch o puerto como hoja a pantalla
+completa que se cierra con el botón Atrás del teléfono. Desde el navegador del
+celular, "Agregar a pantalla de inicio" la instala con su ícono (manifest en
+`frontend/public/`). El escritorio no cambia.
+
 ## Integración opcional con Zabbix (tiempo real)
 
 Zabbix aporta el análisis en tiempo real (problemas, disponibilidad y últimos

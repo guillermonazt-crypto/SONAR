@@ -141,14 +141,12 @@ def history_response(from_influx, from_zabbix):
 @require_GET
 @requires_session
 def port_history(request, pk=None):
-    """Serie de tráfico de un puerto (InfluxDB: contadores; Zabbix: bits por segundo)."""
+    """Serie histórica de tráfico de un puerto (octetos; de InfluxDB o, como respaldo, de Zabbix)."""
     port = Puerto.objects.select_related('switch__plantel').filter(pk=pk).first()
     if port is None:
         return JsonResponse({'points': []}, status=404)
-    data = history_response(lambda: history.port_history(port.switch.nombre, port.nombre),
-                            lambda: zabbix_api.port_history(port.switch, port.nombre))
-    data['unidad'] = 'bps' if data['fuente'] == 'zabbix' else 'octetos'
-    return JsonResponse(data)
+    return JsonResponse(history_response(lambda: history.port_history(port.switch.nombre, port.nombre),
+                                         lambda: zabbix_api.port_history(port.switch, port.nombre)))
 
 
 @require_GET

@@ -168,7 +168,7 @@ function PortPanelSkeleton() {
   );
 }
 
-export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose, onPortChange = () => {} }) {
+export default function PortPanel({ device, items, loading, refreshing = false, failed = "", onRetry = () => {}, onClose, onPortChange = () => {}, extra = null }) {
   const [selected, setSelected] = useState(null);
   const restoredPort = useRef(false);
   async function openPort(port) {
@@ -338,6 +338,7 @@ export default function PortPanel({ device, items, loading, refreshing = false, 
           <button type="button" onClick={onRetry}>Reintentar</button>
         </p>
       )}
+      {extra}
       {loading ? (
         <>
           <p role="status" className="loading-line">

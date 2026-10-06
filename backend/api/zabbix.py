@@ -404,15 +404,28 @@ def switch_history(switch, hours=24, every_seconds=900, now=None):
 
 
 def port_history(switch, port_name, hours=24, every_seconds=180, now=None):
-    """[{time, entrada_bps, salida_bps}] del puerto (Zabbix ya entrega bits por segundo)."""
+    """Mismo formato que history.port_history: [{time, entrada, salida}] con octetos acumulados.
+
+    Zabbix entrega bits por segundo; se integran desde el inicio de la ventana para que
+    la gráfica de SONAR ("Entrada/Salida acumulada") se lea igual. También van las tasas.
+    """
     wanted = short_port(port_name)
     items = [item for item in _traffic_only(_host_items(switch, ('net.if.in[', 'net.if.out[')))
              if short_port(interface_name(item.get('name'))) == wanted]
     if not items:
         raise ZabbixError(f'Zabbix no tiene tráfico de {port_name}.')
-    kinds = {item['itemid']: 'entrada_bps' if item['key_'].startswith('net.if.in[') else 'salida_bps' for item in items}
-    points = {}
+    kinds = {item['itemid']: 'entrada' if item['key_'].startswith('net.if.in[') else 'salida' for item in items}
+    rates = {}
     for itemid, buckets in _series(items, hours, every_seconds, now).items():
         for bucket, value in buckets.items():
-            points.setdefault(bucket, dict(entrada_bps=None, salida_bps=None))[kinds[itemid]] = value
-    return [dict(time=_when(bucket), **values) for bucket, values in sorted(points.items())]
+            rates.setdefault(bucket, dict(entrada=None, salida=None))[kinds[itemid]] = value
+    points, totals, previous = [], dict(entrada=0.0, salida=0.0), None
+    for bucket, values in sorted(rates.items()):
+        if previous is not None:
+            seconds = bucket - previous[0]
+            for kind in totals:
+                totals[kind] += (previous[1][kind] or 0) * seconds / 8
+        points.append(dict(time=_when(bucket), entrada=round(totals['entrada']), salida=round(totals['salida']),
+                           entrada_bps=values['entrada'], salida_bps=values['salida']))
+        previous = (bucket, values)
+    return points

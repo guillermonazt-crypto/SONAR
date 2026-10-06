@@ -13,9 +13,17 @@ function storedTheme() {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+// Color de la barra del navegador en el celular (index.html trae el del sistema).
+const BAR_COLORS = { light: "#e7ebf0", dark: "#000000" };
+
+function syncBarColor(theme) {
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute("content", BAR_COLORS[theme] || BAR_COLORS.dark));
+}
+
 /** Aplica el tema guardado antes del primer render para evitar el parpadeo. */
 export function initTheme() {
   document.documentElement.dataset.theme = storedTheme();
+  syncBarColor(document.documentElement.dataset.theme);
 }
 
 export function currentTheme() {
@@ -24,6 +32,7 @@ export function currentTheme() {
 
 export function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  syncBarColor(theme);
   try {
     localStorage.setItem(KEY, theme);
   } catch {

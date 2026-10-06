@@ -4,6 +4,7 @@ import { timeAgo } from "../utils/format";
 import { useAutoRefresh } from "../utils/refresh";
 import { useViewState } from "../utils/viewState";
 import SonarDataTable from "./DataTable";
+import LivePanel from "./LivePanel";
 import { REASON_TYPES } from "./Status";
 
 const NO_FILTERS = { tipo: "all", estado: "all" };
@@ -143,6 +144,7 @@ export default function Alerts({ user, plantel = "", onOpenDevice = () => {} }) 
         </div>
       </div>
       {error && <p role="alert">{error}</p>}
+      <LivePanel plantel={plantel} />
 
       <div className="filter-bar card alert-filters" role="group" aria-label="Filtrar alertas">
         <label className="inline-field">
