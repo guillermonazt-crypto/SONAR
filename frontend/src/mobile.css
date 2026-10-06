@@ -74,6 +74,8 @@
 .live-problem-main strong { font-weight: 600; overflow-wrap: anywhere; }
 .live-problem-main small { flex-basis: 100%; margin: 0; }
 .live-problem-data { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.live-correlation { color: var(--muted); font-size: 12px; font-style: italic; }
+.live-problem.live-symptom { padding-left: 18px; border-top-style: dashed; }
 .ack-no { color: var(--critical); font-weight: 600; }
 .ack-yes { color: var(--ok); }
 .live-problem-actions { display: flex; gap: 6px; flex: 0 0 auto; }

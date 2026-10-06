@@ -12,7 +12,7 @@ import "./contextual.css";
 // [tipo, etiqueta, parámetro opcional {clave, etiqueta, valor, opciones}]
 const REPORTS = [
   ["inventario", "Inventario"],
-  ["tendencias", "Tendencias", { key: "dias", label: "Periodo", value: 7, options: [[7, "7 días"], [30, "30 días"]] }],
+  ["tendencias", "Tendencias", { key: "dias", label: "Periodo", value: 7, options: [[7, "7 días"], [30, "30 días"], [90, "90 días"], [365, "1 año"]] }],
   ["disponibilidad", "Disponibilidad", { key: "dias", label: "Días", value: 30 }],
   ["puertos-sin-uso", "Puertos sin uso", { key: "dias", label: "Días sin enlace", value: 30 }],
   ["puertos-inestables", "Puertos inestables", { key: "horas", label: "Horas", value: 24 }],

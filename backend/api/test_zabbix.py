@@ -345,3 +345,122 @@ class ZabbixHelpersTests(TestCase):
         self.assertEqual(device_events(warning), dict(puerto=0, lento=0, caido=0, critico=1))
         self.assertEqual(device_events(dict(motivos=[], zabbix=dict(severidad=1))),
                          dict(puerto=0, lento=0, caido=0, critico=0))
+
+
+def tag_list(**values):
+    return [dict(tag=key, value=value) for key, value in values.items()]
+
+
+@mock.patch.dict(os.environ, ENV)
+@mock.patch('api.zabbix.time.time', return_value=NOW)
+class ZabbixCorrelationTests(TestCase):
+    """Problemas correlacionados de la plantilla "SONAR Cisco avanzado": síntomas agrupados bajo su causa."""
+
+    def setUp(self):
+        cache.clear()
+        self.client.force_login(get_user_model().objects.create_user(username='lector', password='test-password',
+                                                                     rol='lector'))
+        apan = Plantel.objects.create(nombre='Apan', division=Division.objects.create(nombre='Escuelas'))
+        Switch.objects.create(nombre='SW-APAN-1', hostname='192.0.2.1', plantel=apan)
+
+    def server(self):
+        sonar = dict(equipo='SW-APAN-1')
+        rows = [
+            dict(eventid='7001', objectid='9101', name='SONAR: enlace físico dañado en Gi1/1/1', severity='4',
+                 acknowledged='0', clock=str(NOW - 300), suppressed='0', opdata='', cause_eventid='0',
+                 tags=tag_list(correlacion='causa', componente='enlace', interfaz='Gi1/1/1', plantel='Apan', **sonar)),
+            # Marcado como síntoma en Zabbix (cause_eventid).
+            dict(eventid='7002', objectid='9102', name='High ICMP ping loss', severity='2', acknowledged='0',
+                 clock=str(NOW - 200), suppressed='0', opdata='', cause_eventid='7001', tags=[]),
+            # Síntoma por etiquetas (misma interfaz) aunque Zabbix no lo haya ligado.
+            dict(eventid='7003', objectid='9103', name='SONAR: errores CRC en Gi1/1/1', severity='2', acknowledged='0',
+                 clock=str(NOW - 100), suppressed='0', opdata='', cause_eventid='0',
+                 tags=tag_list(correlacion='sintoma', componente='enlace', interfaz='Gi1/1/1', **sonar)),
+            # Otra interfaz: no es síntoma de esa causa.
+            dict(eventid='7004', objectid='9104', name='SONAR: errores CRC en Gi1/1/2', severity='2', acknowledged='0',
+                 clock=str(NOW - 50), suppressed='0', opdata='', cause_eventid='0',
+                 tags=tag_list(correlacion='sintoma', componente='enlace', interfaz='Gi1/1/2', **sonar)),
+        ]
+        triggers = [dict(triggerid=row['objectid'], hosts=[dict(hostid='101')]) for row in rows]
+        return fake(**{'problem.get': rows, 'trigger.get': triggers})
+
+    def test_symptoms_are_grouped_under_their_cause(self, _time):
+        server = self.server()
+        with mock.patch('api.zabbix.urlopen', server):
+            data = self.client.get('/api/vivo/').json()
+        problems = {p['eventid']: p for p in data['problemas']}
+        cause = problems['7001']
+        self.assertEqual((cause['causa'], cause['sintomas']), (None, 2))
+        self.assertEqual(cause['etiquetas'], dict(correlacion='causa', componente='enlace', interfaz='Gi1/1/1',
+                                                  equipo='SW-APAN-1'))
+        grouped = dict(eventid='7001', nombre='SONAR: enlace físico dañado en Gi1/1/1')
+        self.assertEqual(problems['7002']['causa'], grouped)
+        self.assertEqual(problems['7003']['causa'], grouped)
+        self.assertIsNone(problems['7004']['causa'])
+        self.assertEqual(data['resumen']['agrupados'], 2)
+        params = next(call['params'] for call in server.calls if call['method'] == 'problem.get')
+        self.assertIn('cause_eventid', params['output'])
+        self.assertEqual(params['selectTags'], ['tag', 'value'])
+
+    def test_zabbix_symptoms_do_not_add_to_the_score(self, _time):
+        with mock.patch('api.zabbix.urlopen', self.server()):
+            data = self.client.get('/api/resumen/').json()
+        site = next(site for site in data['planteles'] if site['nombre'] == 'Apan')
+        # 7002 es síntoma en Zabbix; 7003 y 7004 cuentan (SONAR los agrupa sólo en la vista).
+        self.assertEqual(site['zabbix'], dict(problemas=3, sin_reconocer=3, severidad=4))
+
+
+@mock.patch.dict(os.environ, ENV)
+class ZabbixLongRangeTests(TestCase):
+    """Rangos largos: ?horas= en los historiales y trends de Zabbix en el reporte de tendencias."""
+
+    def setUp(self):
+        cache.clear()
+        self.client.force_login(get_user_model().objects.create_user(username='lector', password='test-password',
+                                                                     rol='lector'))
+        apan = Plantel.objects.create(nombre='Apan', division=Division.objects.create(nombre='Escuelas'))
+        self.switch = Switch.objects.create(nombre='SW-APAN-1', hostname='192.0.2.1', plantel=apan)
+
+    def trend_server(self):
+        def trends(params):
+            return [dict(itemid='4', clock=str(NOW - 5 * 86400), value_avg='35'),
+                    dict(itemid='7', clock=str(NOW - 5 * 86400), value_avg='8000')]
+        return fake(**{'trend.get': trends})
+
+    @mock.patch('api.history.switch_histories', return_value={'SW-APAN-1': []})
+    def test_switch_history_hours_use_trends(self, influx):
+        server = self.trend_server()
+        with mock.patch('api.zabbix.urlopen', server), mock.patch('api.zabbix.time.time', return_value=NOW):
+            data = self.client.get(f'/api/switches/{self.switch.pk}/historial/', {'horas': 24 * 30}).json()
+        self.assertEqual(influx.call_args.kwargs, dict(hours=720, every='6h'))
+        self.assertEqual(data['fuente'], 'zabbix')
+        self.assertIn('trend.get', server.methods())
+        self.assertNotIn('history.get', server.methods())
+        self.assertEqual((data['points'][0]['cpu'], data['points'][0]['entrada_bps']), (35.0, 8000.0))
+
+    @mock.patch('api.history.switch_histories', return_value={'SW-APAN-1': []})
+    def test_invalid_hours_fall_back_to_a_day(self, influx):
+        with mock.patch('api.zabbix.urlopen', fake(**{'history.get': []})):
+            self.client.get(f'/api/switches/{self.switch.pk}/historial/', {'horas': 'mucho'})
+            self.client.get(f'/api/switches/{self.switch.pk}/historial/', {'horas': 10 ** 9})
+        self.assertEqual([call.kwargs['hours'] for call in influx.call_args_list], [24, 8760])
+
+    @mock.patch('api.history.switch_trends', side_effect=ConnectionError('sin ruta'))
+    def test_trends_report_reads_zabbix_trends(self, _influx):
+        server = self.trend_server()
+        with mock.patch('api.zabbix.urlopen', server), mock.patch('api.zabbix.time.time', return_value=NOW):
+            data = self.client.get('/api/reportes/tendencias/', {'dias': 365}).json()
+        self.assertEqual(data['titulo'], 'Tendencias · últimos 365 días')
+        self.assertIsNone(data['detalle'])
+        self.assertIn('Zabbix (trends)', data['descripcion'])
+        self.assertEqual(data['filas'][0]['cpu_prom'], 35.0)
+        trend_call = next(call for call in server.calls if call['method'] == 'trend.get')
+        self.assertEqual(trend_call['params']['time_from'], NOW - 365 * 86400)
+
+    @mock.patch('api.history.switch_trends', side_effect=ConnectionError('sin ruta'))
+    def test_trends_report_respects_influx_only(self, _influx):
+        server = self.trend_server()
+        with mock.patch.dict(os.environ, {'HISTORY_SOURCE': 'influx'}), mock.patch('api.zabbix.urlopen', server):
+            data = self.client.get('/api/reportes/tendencias/', {'dias': 30}).json()
+        self.assertIn('InfluxDB no respondió', data['detalle'])
+        self.assertEqual(server.calls, [])

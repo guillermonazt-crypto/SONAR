@@ -28,6 +28,8 @@ INTERFACE_PREFIXES = {'gigabitethernet': 'gi', 'tengigabitethernet': 'te', 'fast
                       'twentyfivegige': 'twe', 'fortygigabitethernet': 'fo', 'hundredgige': 'hu',
                       'twogigabitethernet': 'tw', 'fivegigabitethernet': 'fi', 'ethernet': 'eth',
                       'port-channel': 'po', 'vlan': 'vl', 'loopback': 'lo'}
+# Etiquetas de la plantilla "SONAR Cisco avanzado" que se muestran en SONAR (correlación de eventos).
+EVENT_TAGS = ('componente', 'interfaz', 'correlacion', 'analisis', 'origen', 'equipo')
 
 
 class ZabbixError(RuntimeError):
@@ -132,7 +134,8 @@ def problems():
     """Problemas activos con el hostid de su disparador, del más grave al más leve."""
     def load():
         rows = call('problem.get', {'output': ['eventid', 'objectid', 'name', 'severity', 'acknowledged', 'clock',
-                                               'suppressed', 'opdata'],
+                                               'suppressed', 'opdata', 'cause_eventid'],
+                                    'selectTags': ['tag', 'value'],
                                     'source': 0, 'object': 0, 'recent': False,
                                     'sortfield': ['eventid'], 'sortorder': 'DESC', 'limit': 500}) or []
         triggerids = list({row['objectid'] for row in rows})
@@ -247,10 +250,22 @@ def summarize_items(items, interfaces=False):
     return values
 
 
+def event_tags(row):
+    """{etiqueta: valor} de las etiquetas de correlación de SONAR que trae el problema."""
+    return {tag['tag']: tag['value'] for tag in row.get('tags') or [] if tag.get('tag') in EVENT_TAGS}
+
+
+def cause_of(row):
+    """eventid de la causa si Zabbix marcó el problema como síntoma (cause_eventid ≠ 0)."""
+    cause = str(row.get('cause_eventid') or '0')
+    return None if cause == '0' else cause
+
+
 def problem_data(row, now, switch=None):
     severity = int(row['severity'])
     clock = int(row['clock'])
-    return dict(eventid=row['eventid'], nombre=row['name'], severidad=severity,
+    return dict(eventid=row['eventid'], nombre=row['name'], severidad=severity, etiquetas=event_tags(row),
+                causa=None, sintomas=0,
                 severidad_nombre=SEVERITIES.get(severity, str(severity)),
                 reconocido=str(row.get('acknowledged')) == '1', suprimido=str(row.get('suppressed')) == '1',
                 datos=row.get('opdata') or '', desde=_when(clock), antiguedad_s=max(0, int(now) - clock),
@@ -288,13 +303,39 @@ def live(switches, now=None, interfaces=False):
     for row in problems():
         owner = next((switch_of_host[h] for h in row['hostids'] if h in switch_of_host), None)
         if owner is not None:
-            active.append(problem_data(row, now, by_pk[owner]))
+            active.append(dict(problem_data(row, now, by_pk[owner]), causa=cause_of(row)))
+    group_symptoms(active)
     counts = {name: 0 for name in SEVERITIES.values()}
     for problem in active:
         counts[problem['severidad_nombre']] += 1
     return dict(problemas=active, switches=rows,
                 resumen=dict(problemas=len(active), sin_reconocer=sum(not p['reconocido'] for p in active),
+                             agrupados=sum(p['causa'] is not None for p in active),
                              por_severidad=counts, relacionados=len(matched), sin_relacionar=len(switches) - len(matched)))
+
+
+def group_symptoms(active):
+    """Agrupa los síntomas bajo su causa: causa={eventid, nombre} y sintomas=N en la causa.
+
+    Vale la marca causa/síntoma de Zabbix (cause_eventid) y, con la plantilla de SONAR, un
+    problema correlacion=sintoma con una causa abierta del mismo equipo (y misma interfaz si
+    ambos la tienen). Las reglas de correlación global suelen cerrarlos antes de llegar aquí.
+    """
+    by_id = {p['eventid']: p for p in active}
+    causes = [p for p in active if p['etiquetas'].get('correlacion') == 'causa']
+    for problem in active:
+        cause = by_id.get(problem['causa']) if problem['causa'] else None
+        if cause is None and problem['etiquetas'].get('correlacion') == 'sintoma':
+            tags = problem['etiquetas']
+            cause = next((c for c in causes if c['switch'] == problem['switch'] and c is not problem and (
+                not tags.get('interfaz') or not c['etiquetas'].get('interfaz')
+                or c['etiquetas']['interfaz'] == tags['interfaz'])), None)
+        if cause is None or cause is problem:
+            problem['causa'] = None
+            continue
+        problem['causa'] = dict(eventid=cause['eventid'], nombre=cause['nombre'])
+        cause['sintomas'] += 1
+    return active
 
 
 def problems_by_switch(switches):
@@ -302,8 +343,8 @@ def problems_by_switch(switches):
     _, switch_of_host = _owners(list(switches))
     result = {}
     for row in problems():
-        if str(row.get('suppressed')) == '1':
-            continue
+        if str(row.get('suppressed')) == '1' or cause_of(row):
+            continue  # suprimidos y síntomas (su causa ya cuenta)
         owner = next((switch_of_host[h] for h in row['hostids'] if h in switch_of_host), None)
         if owner is None:
             continue

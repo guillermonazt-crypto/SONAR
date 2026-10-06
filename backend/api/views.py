@@ -138,6 +138,20 @@ def history_response(from_influx, from_zabbix):
     return {'points': zabbix_points, 'fuente': 'zabbix', **({'detail': errors[0]} if errors else {})}
 
 
+def history_hours(params):
+    """?horas= (1 a 8760, 24 por omisión) y el tamaño de ventana para InfluxDB y Zabbix.
+
+    Más de 24 h en Zabbix sale de trends (promedios horarios, 365 días).
+    """
+    try:
+        hours = min(max(int(params.get('horas', 24)), 1), 24 * 365)
+    except (TypeError, ValueError):
+        hours = 24
+    if hours <= 24:
+        return hours, '15m', 900
+    return (hours, '1h', 3600) if hours <= 24 * 7 else (hours, '6h', 21600)
+
+
 @require_GET
 @requires_session
 def port_history(request, pk=None):
@@ -145,8 +159,11 @@ def port_history(request, pk=None):
     port = Puerto.objects.select_related('switch__plantel').filter(pk=pk).first()
     if port is None:
         return JsonResponse({'points': []}, status=404)
-    return JsonResponse(history_response(lambda: history.port_history(port.switch.nombre, port.nombre),
-                                         lambda: zabbix_api.port_history(port.switch, port.nombre)))
+    hours, _every, seconds = history_hours(request.GET)
+    return JsonResponse(history_response(
+        lambda: history.port_history(port.switch.nombre, port.nombre, hours=hours),
+        lambda: zabbix_api.port_history(port.switch, port.nombre, hours=hours,
+                                        every_seconds=180 if hours <= 24 else seconds)))
 
 
 @require_GET
@@ -156,8 +173,10 @@ def switch_history(request, pk=None):
     switch = Switch.objects.select_related('plantel').filter(pk=pk).first()
     if switch is None:
         return JsonResponse({'points': []}, status=404)
-    return JsonResponse(history_response(lambda: history.switch_histories([switch.nombre]).get(switch.nombre, []),
-                                         lambda: zabbix_api.switch_history(switch)))
+    hours, every, seconds = history_hours(request.GET)
+    return JsonResponse(history_response(
+        lambda: history.switch_histories([switch.nombre], hours=hours, every=every).get(switch.nombre, []),
+        lambda: zabbix_api.switch_history(switch, hours=hours, every_seconds=seconds)))
 
 
 def live_switches(plantel=None):

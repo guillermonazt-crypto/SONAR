@@ -3,6 +3,9 @@
     python zabbix/init_zabbix.py                    contraseña de Admin e interfaz del agente
     python zabbix/init_zabbix.py --switches         además da de alta los switches de SONAR
     python zabbix/init_zabbix.py --token            además crea el token "SONAR" para Django
+    python zabbix/init_zabbix.py --timescaledb      activa TimescaleDB (hypertables y compresión)
+    python zabbix/init_zabbix.py --avanzado         plantilla SONAR, correlación, Geomap, SLA e histórico
+    python zabbix/init_zabbix.py --proxy [NOMBRE]   registra un proxy activo para una zona
 
 Lee zabbix/.env (ZBX_URL, ZBX_ADMIN_PASSWORD, ZBX_SNMP_COMMUNITY) y el .env de SONAR
 (INVENTORY_SOURCE, SNMP_*). Sólo usa la biblioteca estándar y PyYAML; con
@@ -12,12 +15,15 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import avanzado  # noqa: E402
 DEFAULT_PASSWORD = 'zabbix'
 TEMPLATES = ('Cisco IOS by SNMP', 'Network Generic Device by SNMP')
 COMMUNITY_MACRO = '{$SNMP_COMMUNITY}'
@@ -227,6 +233,54 @@ def add_switches(api, switches, sonar_env, zabbix_env):
     return created
 
 
+def sonar_extras(sonar_root):
+    """({ip: [ifIndex de troncales]}, {plantel: ubicacion}) de la base de SONAR; vacíos si no hay Django."""
+    try:
+        django_switches(sonar_root)  # prepara Django
+        from planteles.models import Plantel
+        from switches.models import Puerto
+        trunks = {}
+        for ip, index in Puerto.objects.filter(es_trunk=True, switch__activo=True).values_list('switch__hostname',
+                                                                                             'indice'):
+            trunks.setdefault(ip, []).append(index)
+        return trunks, dict(Plantel.objects.exclude(ubicacion='').values_list('nombre', 'ubicacion'))
+    except Exception as error:
+        print(f'! Sin la base de SONAR ({error}): uplinks por nombre/descripción y coordenadas por nombre.')
+        return {}, {}
+
+
+def compose(*args, stdin=None):
+    """docker compose del stack de Zabbix (carpeta zabbix/)."""
+    return subprocess.run(['docker', 'compose', *args], cwd=HERE, input=stdin, capture_output=True, check=False)
+
+
+def enable_timescaledb(zabbix_env):
+    """Extensión TimescaleDB e hypertables de Zabbix (timescaledb.sql es idempotente)."""
+    user, db = zabbix_env.get('ZBX_POSTGRES_USER', 'zabbix'), zabbix_env.get('ZBX_POSTGRES_DB', 'zabbix')
+    psql = ['exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-q', '-U', user, '-d', db]
+    result = compose(*psql, '-c', 'CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;')
+    if result.returncode:
+        raise ZabbixError('TimescaleDB no disponible en postgres (¿imagen timescale/timescaledb y '
+                          f'shared_preload_libraries?): {result.stderr.decode(errors="replace").strip()}')
+    check = compose(*psql, '-tAc', "SELECT count(*) FROM timescaledb_information.hypertables "
+                                   "WHERE hypertable_name IN ('history','trends')")
+    if check.stdout.decode().strip() == '2':
+        print('· TimescaleDB ya activo (history y trends son hypertables).')
+        return
+    script = compose('exec', '-T', 'zabbix-server', 'cat', '/usr/share/doc/zabbix-server-postgresql/timescaledb.sql')
+    if script.returncode or not script.stdout:
+        raise ZabbixError('No se encontró timescaledb.sql en el contenedor zabbix-server.')
+    print('· Convirtiendo history/trends a hypertables (se detiene zabbix-server un momento)...')
+    compose('stop', 'zabbix-server')
+    try:
+        result = compose(*psql, stdin=script.stdout)
+    finally:
+        compose('start', 'zabbix-server')
+    if result.returncode:
+        raise ZabbixError(f'timescaledb.sql falló: {result.stderr.decode(errors="replace").strip()}')
+    print('· TimescaleDB activo con compresión (Zabbix la aplica a lo mayor de 7 días).')
+
+
 def create_token(api):
     userid = admin_id(api)
     old = api.call('token.get', {'output': ['tokenid'], 'userids': [userid], 'filter': {'name': TOKEN_NAME}})
@@ -240,6 +294,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Configura Zabbix para SONAR.')
     parser.add_argument('--switches', action='store_true', help='da de alta los switches de SONAR')
     parser.add_argument('--token', action='store_true', help='(re)crea el token "SONAR" e imprime ZABBIX_TOKEN')
+    parser.add_argument('--avanzado', action='store_true',
+                        help='plantilla SONAR (traps, uplinks 30 s, tendencias), correlación, Geomap, SLA e histórico')
+    parser.add_argument('--timescaledb', action='store_true',
+                        help='activa TimescaleDB en la base (docker compose exec; detiene el server un momento)')
+    parser.add_argument('--proxy', metavar='NOMBRE', nargs='?', const='',
+                        help='registra un proxy activo (por omisión ZBX_PROXY_HOSTNAME o "SONAR-proxy-zona1")')
     parser.add_argument('--sonar-root', default=str(HERE.parent), help='carpeta de SONAR (.env, inventario, base)')
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
@@ -257,6 +317,14 @@ def main(argv=None):
         fix_agent_interface(api)
         if args.switches:
             add_switches(api, load_switches(sonar_root, sonar_env), sonar_env, zabbix_env)
+        if args.timescaledb:
+            enable_timescaledb(zabbix_env)
+        if args.avanzado:
+            trunks, ubicaciones = sonar_extras(sonar_root)
+            history_days = int(zabbix_env.get('ZBX_HISTORY_DAYS') or 90)
+            avanzado.apply(api, sonar_root, trunks, ubicaciones, history_days=max(30, min(history_days, 90)))
+        if args.proxy is not None:
+            avanzado.apply_proxy(api, args.proxy or zabbix_env.get('ZBX_PROXY_HOSTNAME') or 'SONAR-proxy-zona1')
         if args.token:
             token = create_token(api)
             print('\nAgrega al .env de SONAR:')

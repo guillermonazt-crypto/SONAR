@@ -9,11 +9,12 @@ El stack es independiente del `docker-compose.yml` de SONAR (proyecto
 
 | Servicio | Imagen | Puerto en el equipo |
 | --- | --- | --- |
-| postgres | postgres:16-alpine | (sólo red interna) |
+| postgres | timescale/timescaledb:2.19.3-pg16 (PostgreSQL 16 + TimescaleDB) | (sólo red interna) |
 | zabbix-server | zabbix/zabbix-server-pgsql:alpine-7.0-latest | `ZBX_SERVER_PORT` (10051/tcp) |
 | zabbix-web | zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest | `ZBX_HTTP_PORT` (8090/tcp → 8080) |
 | zabbix-agent | zabbix/zabbix-agent2:alpine-7.0-latest | (sólo red interna) |
-| zabbix-snmptraps | zabbix/zabbix-snmptraps:alpine-7.0-latest (profile `traps`) | `ZBX_TRAPS_PORT` (162/udp → 1162) |
+| zabbix-snmptraps | zabbix/zabbix-snmptraps:alpine-7.0-latest | `ZBX_TRAPS_PORT` (162/udp → 1162) |
+| zabbix-proxy | zabbix/zabbix-proxy-sqlite3:alpine-7.0-latest (profile `proxy`) | (sólo red interna; se conecta al 10051) |
 
 ## Arranque
 
@@ -35,6 +36,9 @@ Desde la raíz de SONAR, con el `.venv` activo:
 ```powershell
 python zabbix/init_zabbix.py --switches --token
 ```
+
+Después, para lo avanzado (traps, tendencias, correlación, Geomap, SLA y 365 días de
+trends): `python zabbix/init_zabbix.py --timescaledb --avanzado` (ver más abajo).
 
 El script es idempotente (se puede repetir) y sólo usa la biblioteca estándar y PyYAML:
 
@@ -72,26 +76,139 @@ existe en Zabbix 7.2).
 - Ajusta los umbrales con las macros de la plantilla (p. ej. `{$CPU.UTIL.CRIT}`,
   `{$IF.ERRORS.WARN}`) a nivel de grupo o host.
 
-## Traps SNMP (opcional)
+## Monitoreo avanzado (`--avanzado`)
 
 ```powershell
-docker compose --profile traps up -d
+docker compose up -d                                   # postgres con TimescaleDB y receptor de traps
+python zabbix/init_zabbix.py --timescaledb --avanzado  # idempotente: se puede repetir
 ```
 
-Configura los switches para enviar traps al equipo (UDP `ZBX_TRAPS_PORT`). El
-contenedor de traps comparte el volumen `zbx_snmptraps` con el servidor; la
-plantilla los recibe en el ítem `snmptrap.fallback`. En Windows, el puerto 162 puede
-estar ocupado por el servicio "Captura SNMP"; detenlo o usa otro puerto.
+`--timescaledb` crea la extensión y convierte `history*`/`trends*` en hypertables
+(detiene `zabbix-server` unos segundos; si ya están, no hace nada). `--avanzado`
+configura todo lo siguiente, buscando cada objeto por nombre para actualizarlo en lugar
+de duplicarlo. Los cambios hechos a mano en la plantilla se pierden al repetirlo:
+ajusta las macros a nivel de host o grupo.
+
+### Por qué no hay "agente" en los switches
+
+Los Cisco IOS no admiten instalar el agente de Zabbix y sólo hablan SNMPv2c. El
+equivalente real de los "agentes activos" es:
+
+1. **Traps SNMP** (eventos al instante): el contenedor `zabbix-snmptraps` recibe los
+   traps en UDP 162 y el servidor los lee (`StartSNMPTrapper=1`, variable
+   `ZBX_ENABLE_SNMP_TRAPS`). La plantilla tiene los ítems
+   `snmptrap["linkDown|…"]` y `snmptrap["linkUp|…"]` y el disparador
+   *SONAR: trap linkDown recibido* (5 min abierto por trap; se puede cerrar a mano).
+   Zabbix asocia el trap al host por la IP de origen, que debe ser la misma de su interfaz SNMP.
+2. **Proxy activo** (`zabbix-proxy-sqlite3`, modo activo: empuja los datos al servidor
+   por el 10051) preparado para una zona o sede:
+   ```powershell
+   docker compose --profile proxy up -d
+   python zabbix/init_zabbix.py --proxy               # registra "SONAR-proxy-zona1" (ZBX_PROXY_HOSTNAME)
+   ```
+   En otra sede se copia sólo el servicio `zabbix-proxy` con `ZBX_PROXY_SERVER=<IP del
+   servidor>` y `ZBX_PROXY_HOSTNAME` distinto, y se registra con `--proxy <nombre>`. Para
+   que un plantel lo use: *Data collection → Hosts → (host) → Monitored by: Proxy*. Los
+   traps de ese plantel deben ir al equipo del proxy (con su propio `zabbix-snmptraps`).
+3. **Ítems críticos rápidos con SNMP bulk**: ping (`icmpping[,3]`, pérdida y
+   latencia) y, en cada uplink, estado operativo, bits in/out, errores y CRC cada
+   `{$SONAR.FAST.INTERVAL}` (30 s; admite 10-30 s). La interfaz SNMP de los hosts tiene
+   *bulk* activado, así que el servidor agrupa esas consultas.
+
+### Plantilla "SONAR Cisco avanzado"
+
+Se enlaza a los hosts con la etiqueta `sonar=switch`, junto a *Cisco IOS by SNMP*.
+
+- **Uplinks** (descubrimiento `sonar.uplink.discovery`): el `ifIndex` de los troncales que
+  SONAR ya conoce (`Puerto.es_trunk`, macro por host `{$SONAR.UPLINK.IFINDEX.MATCHES}`),
+  interfaces Te/Twe/Fo/Hu o descripción con "uplink/troncal/core/enlace".
+- **Óptica RX** (`sonar.optical.discovery`): sensores dBm de CISCO-ENTITY-SENSOR-MIB, los
+  mismos que lee el worker de SONAR; umbral `{$SONAR.OPTICAL.RX.MIN}` = -24 dBm.
+- **CPU**: `sonar.cpu.util`, el máximo de `cpmCPUTotal1minRev` (switches apilados).
+
+"ML nativo" de Zabbix 7 = funciones de tendencia y pronóstico (no hay otro motor):
+
+| Disparador | Función |
+| --- | --- |
+| CPU anómala, tráfico anómalo, RX anómala | `trendstl` (descomposición STL de trends horarios, estacionalidad diaria, 7-14 días, 3 MAD) |
+| CPU fuera de su línea base | `baselinedev` (misma hora de los 7 días anteriores) |
+| Tráfico / CRC sobre su línea base | `trendavg` contra `baselinewma` |
+| CPU llegará a 95 % en < 7 d, RX llegará a -24 dBm en < 14 d | ítem calculado con `timeleft` sobre 30 días |
+| Uplink se saturará en 7 días | ítem calculado con `forecast` sobre 30 días |
+
+Las funciones de tendencia se evalúan cada hora y necesitan datos: los primeros días
+quedan como *Unknown* ("not enough data") y los pronósticos sólo avisan con 6 días de
+historia o más. Es normal.
+
+### Correlación de eventos
+
+- **Etiquetas** en todos los disparadores SONAR: `equipo` ({HOST.HOST}), `componente`
+  (`disponibilidad`, `red`, `enlace`, `cpu`, `optica`), `interfaz`, `correlacion`
+  (`causa`/`sintoma`) y `analisis`; `plantel` y `rol` vienen del host.
+- **Disparador compuesto** *SONAR: enlace físico dañado en <interfaz>*: CRC sostenido en
+  el uplink **y** pérdida o latencia hacia el switch. Los disparadores de CRC de esa
+  interfaz dependen de él (no se generan mientras está activo).
+- **Dependencias**: el ping rápido de cada switch de acceso depende del core de su plantel.
+- **Correlación global** (*Data collection → Event correlation*):
+  1. una causa abierta cierra los síntomas nuevos del mismo equipo;
+  2. una causa nueva cierra los síntomas previos del mismo equipo;
+  3. un core sin ping cierra los "sin ping" de los accesos del mismo plantel.
+- **SONAR** muestra en *En vivo (Zabbix)* cada causa con sus síntomas debajo ("↳ Síntoma
+  de …"), tanto los que Zabbix marca como síntoma (`cause_eventid`) como los que comparten
+  equipo e interfaz; los síntomas de Zabbix no suman al semáforo ponderado.
+
+### Tablero "SONAR – Planteles", servicios y SLA
+
+- Inventario de cada switch en modo manual con `location_lat`/`location_lon` del plantel:
+  "latitud, longitud" del campo *ubicación* del plantel en SONAR o, si está vacío, la
+  tabla de `frontend/src/utils/locations.js` (la misma del mapa del NOC).
+- Servicio "SONAR · Red UAEH" con un hijo "Plantel: <nombre>" por plantel (problemas con
+  `plantel=<nombre>` y `componente=disponibilidad`).
+- SLA "SONAR planteles 99.5%" mensual sobre los servicios `sonar=plantel`.
+- Tablero (público) con Geomap, reporte SLA, problemas por severidad y problemas con sus
+  etiquetas. *Dashboards → SONAR – Planteles*.
+
+### Histórico de 365 días sin InfluxDB
+
+- PostgreSQL con TimescaleDB: hypertables y compresión de lo mayor a 7 días.
+- Housekeeping: history `ZBX_HISTORY_DAYS` (90 por omisión, 30-90) y trends 365 días.
+- SONAR (`HISTORY_SOURCE=auto`): las gráficas aceptan `?horas=` (hasta 8760); más de
+  24 h en Zabbix sale de trends. El reporte *Tendencias* ofrece 90 días y 1 año y, si
+  InfluxDB no responde o no tiene el periodo, usa los trends de Zabbix.
+
+### Lo que hay que configurar en cada switch (a mano, no lo hace el script)
+
+En modo configuración de cada Cisco, con la IP del equipo donde corre
+`zabbix-snmptraps` (o del proxy de la sede) y la misma comunidad v2c que ya usa SONAR:
+
+```text
+snmp-server enable traps snmp linkdown linkup
+snmp-server host <IP del servidor Zabbix> version 2c <comunidad>
+snmp-server trap-source <interfaz de gestión, p. ej. Vlan1>
+```
+
+`trap-source` hace que el trap salga con la IP que Zabbix tiene dada de alta. Verifica
+con `show snmp host`; luego, en Zabbix, *Monitoring → Latest data*, ítem "Trap SNMP
+linkDown" del host al desconectar un puerto de prueba. En Windows el puerto 162/udp puede
+estar ocupado por el servicio "Captura SNMP" (detenlo o cambia `ZBX_TRAPS_PORT`) y el
+firewall debe permitir 162/udp entrante desde la red de gestión.
 
 ## Respaldo y restauración
 
 ```powershell
-docker compose exec -T postgres pg_dump -U zabbix -d zabbix -Fc > zabbix-$(Get-Date -Format yyyyMMdd).dump
+# Dentro del contenedor y luego se copia: en PowerShell 5.1 el ">" corrompe archivos binarios.
+docker compose exec -T postgres pg_dump -U zabbix -d zabbix -Fc -f /tmp/zabbix.dump
+docker compose cp postgres:/tmp/zabbix.dump zabbix-$(Get-Date -Format yyyyMMdd).dump
 # Restaurar (con el servidor detenido):
 docker compose stop zabbix-server zabbix-web
-docker compose exec -T postgres pg_restore -U zabbix -d zabbix --clean < zabbix-AAAAMMDD.dump
+docker compose cp zabbix-AAAAMMDD.dump postgres:/tmp/zabbix.dump
+docker compose exec -T postgres pg_restore -U zabbix -d zabbix --clean /tmp/zabbix.dump
 docker compose start zabbix-server zabbix-web
 ```
+
+Con TimescaleDB, para restaurar en una base nueva primero corre
+`CREATE EXTENSION timescaledb;` y `SELECT timescaledb_pre_restore();`, y al terminar
+`SELECT timescaledb_post_restore();`.
 
 Los datos viven en el volumen `sonar-zabbix_zbx_postgres`; `docker compose down`
 los conserva y `docker compose down -v` los **borra**.
@@ -100,5 +217,5 @@ los conserva y `docker compose down -v` los **borra**.
 
 - 8090/tcp: interfaz web y API (`ZBX_URL`). Ábrelo sólo a la red del NOC.
 - 10051/tcp: servidor (agentes activos y proxies).
-- 162/udp: traps SNMP (sólo con el profile `traps`).
+- 162/udp: traps SNMP desde los switches (`zabbix-snmptraps`).
 - Salida hacia los switches: ICMP y SNMP 161/udp.

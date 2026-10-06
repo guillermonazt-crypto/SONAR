@@ -3,6 +3,7 @@
 # Independiente del docker-compose de SONAR: proyecto y red propios.
 #   cd zabbix && cp .env.example .env && docker compose up -d
 #   python init_zabbix.py --switches --token
+#   python init_zabbix.py --timescaledb --avanzado   (TimescaleDB, plantilla SONAR, Geomap, SLA)
 name: sonar-zabbix
 
 x-db-env: &db-env
@@ -12,9 +13,13 @@ x-db-env: &db-env
   POSTGRES_PASSWORD: ${ZBX_POSTGRES_PASSWORD:?Define ZBX_POSTGRES_PASSWORD en zabbix/.env}
 
 services:
+  # PostgreSQL 16 con TimescaleDB (misma versión mayor que postgres:16-alpine: el volumen
+  # existente sirve tal cual). init_zabbix.py --timescaledb crea las hypertables.
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:${ZBX_TIMESCALEDB_TAG:-2.19.3-pg16}
     restart: unless-stopped
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb", "-c", "timescaledb.telemetry_level=off",
+              "-c", "max_connections=200"]
     environment:
       POSTGRES_DB: ${ZBX_POSTGRES_DB:-zabbix}
       POSTGRES_USER: ${ZBX_POSTGRES_USER:-zabbix}
@@ -40,6 +45,8 @@ services:
       ZBX_STARTPINGERS: 5
       ZBX_STARTSNMPPOLLERS: 5
       ZBX_ENABLE_SNMP_TRAPS: "true"
+      ZBX_STARTPOLLERS: 10
+      ZBX_STARTTRAPPERS: 5
       ZBX_TIMEOUT: 10
     ports:
       - "${ZBX_SERVER_PORT:-10051}:10051"
@@ -76,10 +83,10 @@ services:
       ZBX_SERVER_HOST: zabbix-server
     networks: [zabbix]
 
-  # Opcional: docker compose --profile traps up -d
+  # Receptor de traps SNMP (linkDown/linkUp al instante). Los switches deben tener
+  # "snmp-server host <IP de este equipo> version 2c <comunidad>" (ver README).
   zabbix-snmptraps:
     image: zabbix/zabbix-snmptraps:alpine-7.0-latest
-    profiles: ["traps"]
     restart: unless-stopped
     ports:
       - "${ZBX_TRAPS_PORT:-162}:1162/udp"
@@ -87,9 +94,32 @@ services:
       - zbx_snmptraps:/var/lib/zabbix/snmptraps
     networks: [zabbix]
 
+  # Proxy activo para una zona/sede: empuja al server lo que recolecta de sus switches.
+  # Opcional: docker compose --profile proxy up -d  (y init_zabbix.py --proxy).
+  # En otra sede se corre sólo este servicio con ZBX_SERVER_HOST=<IP del server>.
+  zabbix-proxy:
+    image: zabbix/zabbix-proxy-sqlite3:alpine-7.0-latest
+    profiles: ["proxy"]
+    restart: unless-stopped
+    depends_on:
+      - zabbix-server
+    environment:
+      ZBX_PROXYMODE: 0
+      ZBX_HOSTNAME: ${ZBX_PROXY_HOSTNAME:-SONAR-proxy-zona1}
+      ZBX_SERVER_HOST: ${ZBX_PROXY_SERVER:-zabbix-server}
+      ZBX_PROXYOFFLINEBUFFER: 24
+      ZBX_CONFIGFREQUENCY: 60
+      ZBX_STARTPINGERS: 3
+      ZBX_STARTSNMPPOLLERS: 3
+      ZBX_TIMEOUT: 10
+    volumes:
+      - zbx_proxy:/var/lib/zabbix/db_data
+    networks: [zabbix]
+
 volumes:
   zbx_postgres:
   zbx_snmptraps:
+  zbx_proxy:
 
 networks:
   zabbix:

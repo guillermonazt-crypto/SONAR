@@ -293,7 +293,8 @@ def opticas(params, now):
                           ('longitud_onda_nm', 'λ nm'), ('motivos', 'Motivos')], filas=rows)
 
 
-TREND_DAYS = (7, 30)
+# 90 y 365 días salen de los trends de Zabbix (365 d) cuando InfluxDB ya no los guarda.
+TREND_DAYS = (7, 30, 90, 365)
 
 
 def _mean(values):
@@ -320,11 +321,28 @@ def _local_day(iso):
     return timezone.localtime(datetime.fromisoformat(iso)).date().isoformat()
 
 
+def zabbix_trends(switches, days):
+    """{nombre: puntos} de los trends de Zabbix (respaldo de largo plazo); {} si no aplica o falla."""
+    from . import zabbix
+    from .views import history_source
+    if history_source() == 'influx' or not zabbix.configured():
+        return {}
+    series = {}
+    for s in switches:
+        try:
+            series[s.nombre] = zabbix.switch_history(s, hours=days * 24, every_seconds=3600 if days <= 7 else 21600)
+        except zabbix.ZabbixError:
+            series[s.nombre] = []
+    return series if any(series.values()) else {}
+
+
 def tendencias(params, now):
-    """CPU, memoria, tráfico, reinicios y alertas de los últimos 7 o 30 días.
+    """CPU, memoria, tráfico, reinicios y alertas de los últimos 7, 30, 90 o 365 días.
 
     Las métricas salen de InfluxDB (bucket de largo plazo si existe). Si InfluxDB
-    no responde, el reporte se entrega igual con lo que guarda Django (alertas y
+    no responde o no tiene datos del periodo y Zabbix está configurado
+    (HISTORY_SOURCE≠influx), salen de los trends horarios de Zabbix. Si nada
+    responde, el reporte se entrega igual con lo que guarda Django (alertas y
     minutos en riesgo) y lo indica en la descripción.
     """
     days = _days(params, 7)
@@ -340,6 +358,11 @@ def tendencias(params, now):
         series, bucket = switch_trends([s.nombre for s in switches], days)
     except Exception as error:
         series, bucket, detail = {}, None, f'InfluxDB no respondió ({error}); sólo se muestran alertas registradas en SONAR.'
+    zabbix_series = None
+    if not any(series.values()):
+        zabbix_series = zabbix_trends(switches, days)
+        if zabbix_series:
+            series, detail = zabbix_series, None
     rows = []
     for s in switches:
         points = series.get(s.nombre, [])
@@ -377,7 +400,7 @@ def tendencias(params, now):
         total = lambda side: round(sum(_mean(v) for v in day[side].values())) if day and day[side] else None
         serie.append(dict(dia=key, cpu=_mean(day['cpu']) if day else None, memoria=_mean(day['memoria']) if day else None,
                           entrada_bps=total('entrada'), salida_bps=total('salida'), alertas=new_alerts.get(key, 0)))
-    source = f'InfluxDB ({bucket})' if bucket else 'sin lecturas en InfluxDB'
+    source = ('Zabbix (trends)' if zabbix_series else f'InfluxDB ({bucket})' if bucket else 'sin lecturas en InfluxDB')
     return dict(titulo=f'Tendencias · últimos {days} días',
                 descripcion=detail or f'Promedios y picos por switch ({source}); alertas y minutos en riesgo del centro de alertas.',
                 detalle=detail, serie=serie,

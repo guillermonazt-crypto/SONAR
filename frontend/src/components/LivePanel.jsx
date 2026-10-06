@@ -26,6 +26,20 @@ export function age(seconds) {
 const number = (value, unit, digits = 1) => (value === null || value === undefined ? "—" : `${Number(value).toFixed(digits).replace(/\.0$/, "")}${unit}`);
 const yesNo = (value, yes = "Sí", no = "No") => (value === null || value === undefined ? "—" : value ? yes : no);
 
+/** Cada causa seguida de sus síntomas (correlación de eventos de Zabbix y etiquetas de SONAR). */
+export function groupProblems(problems) {
+  const symptoms = {};
+  for (const problem of problems) {
+    if (problem.causa) (symptoms[problem.causa.eventid] ||= []).push(problem);
+  }
+  const ordered = [];
+  for (const problem of problems) {
+    if (problem.causa && problems.some((other) => other.eventid === problem.causa.eventid)) continue;
+    ordered.push(problem, ...(symptoms[problem.eventid] || []));
+  }
+  return ordered;
+}
+
 /** Un problema activo de Zabbix con reconocimiento y comentario desde SONAR (editores). */
 export function ProblemItem({ problem, canAck, onDone, showSite = true }) {
   const [note, setNote] = useState("");
@@ -45,11 +59,15 @@ export function ProblemItem({ problem, canAck, onDone, showSite = true }) {
     }
   }
   return (
-    <li className={`live-problem sev-${problem.severidad}${problem.reconocido ? " acknowledged" : ""}`}>
+    <li className={`live-problem sev-${problem.severidad}${problem.reconocido ? " acknowledged" : ""}${problem.causa ? " live-symptom" : ""}`}>
       <div className="live-problem-main">
         <span className={`sev-badge sev-${problem.severidad}`}>{problem.severidad_nombre}</span>
         <strong>{problem.nombre}</strong>
         {problem.datos && <span className="live-problem-data">{problem.datos}</span>}
+        {problem.causa && <small className="live-correlation">↳ Síntoma de: {problem.causa.nombre}</small>}
+        {problem.sintomas > 0 && (
+          <small className="live-correlation">Causa probable · agrupa {problem.sintomas} {problem.sintomas === 1 ? "síntoma" : "síntomas"}</small>
+        )}
         <small>
           {problem.switch?.nombre}
           {showSite && problem.plantel && ` · ${problem.plantel.nombre}`} · desde hace {age(problem.antiguedad_s)}
@@ -112,7 +130,7 @@ export default function LivePanel({ plantel = "", title = "En vivo (Zabbix)", li
       </section>
     );
   }
-  const problems = data?.problemas || [];
+  const problems = groupProblems(data?.problemas || []);
   const counts = data?.resumen?.por_severidad || {};
   const rows = data?.switches || [];
   const linked = rows.filter((row) => row.hostid);

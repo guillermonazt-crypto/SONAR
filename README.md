@@ -245,6 +245,13 @@ crítico, Alta como caído, Advertencia/Media como lento) sin duplicar lo que SO
 ya detectó en el mismo equipo. Reconocer o comentar un problema desde SONAR
 requiere rol editor o administrador y queda en la bitácora.
 
+`python zabbix/init_zabbix.py --timescaledb --avanzado` agrega traps SNMP, uplinks a
+30 s, disparadores con funciones de tendencia (trendstl, baselinedev, forecast/timeleft),
+correlación de eventos, el tablero Geomap "SONAR – Planteles" con SLA por plantel y
+365 días de trends en TimescaleDB. El panel En vivo agrupa los síntomas bajo su causa y
+el reporte de Tendencias llega a 1 año con los trends de Zabbix. Detalles y la
+configuración de traps en los switches: [`zabbix/README.md`](zabbix/README.md).
+
 ## Pruebas sin switches reales
 
 ```powershell

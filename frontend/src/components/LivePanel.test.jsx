@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
-import LivePanel, { SwitchLive, age } from "./LivePanel";
+import LivePanel, { SwitchLive, age, groupProblems } from "./LivePanel";
 import Sidebar from "./Sidebar";
 import { closeButton, installBackClose } from "../utils/backClose";
 import { api } from "../api/client";
@@ -28,6 +28,19 @@ const live = (overrides = {}) => ({
 });
 
 describe("LivePanel", () => {
+  it("agrupa los síntomas debajo de su causa (correlación de eventos)", async () => {
+    const cause = problem({ eventid: "7001", nombre: "SONAR: enlace físico dañado en Gi1/1/1", sintomas: 1, causa: null });
+    const other = problem({ eventid: "7005", nombre: "High CPU", severidad: 2, severidad_nombre: "Advertencia" });
+    const symptom = problem({ eventid: "7002", nombre: "SONAR: errores CRC en Gi1/1/1", severidad: 2, severidad_nombre: "Advertencia",
+      causa: { eventid: "7001", nombre: "SONAR: enlace físico dañado en Gi1/1/1" } });
+    expect(groupProblems([cause, other, symptom]).map((p) => p.eventid)).toEqual(["7001", "7002", "7005"]);
+    api.live.mockResolvedValue(live({ problemas: [cause, other, symptom] }));
+    render(<LivePanel />);
+    expect(await screen.findByText("Causa probable · agrupa 1 síntoma")).toBeInTheDocument();
+    const line = screen.getByText("↳ Síntoma de: SONAR: enlace físico dañado en Gi1/1/1");
+    expect(line.closest("li")).toHaveClass("live-symptom");
+  });
+
   it("muestra problemas con severidad, antigüedad, equipos caídos y la fuente", async () => {
     api.live.mockResolvedValue(live());
     render(<LivePanel />);
