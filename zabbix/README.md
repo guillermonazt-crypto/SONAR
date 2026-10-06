@@ -13,7 +13,7 @@ El stack es independiente del `docker-compose.yml` de SONAR (proyecto
 | zabbix-server | zabbix/zabbix-server-pgsql:alpine-7.0-latest | `ZBX_SERVER_PORT` (10051/tcp) |
 | zabbix-web | zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest | `ZBX_HTTP_PORT` (8090/tcp → 8080) |
 | zabbix-agent | zabbix/zabbix-agent2:alpine-7.0-latest | (sólo red interna) |
-| zabbix-snmptraps | zabbix/zabbix-snmptraps:alpine-7.0-latest | `ZBX_TRAPS_PORT` (162/udp → 1162) |
+| zabbix-snmptraps | zabbix/zabbix-snmptraps:alpine-7.0-latest (profile `traps`, sólo Linux) | `ZBX_TRAPS_PORT` (162/udp → 1162) |
 | zabbix-proxy | zabbix/zabbix-proxy-sqlite3:alpine-7.0-latest (profile `proxy`) | (sólo red interna; se conecta al 10051) |
 
 ## Arranque
@@ -79,8 +79,9 @@ existe en Zabbix 7.2).
 ## Monitoreo avanzado (`--avanzado`)
 
 ```powershell
-docker compose up -d                                   # postgres con TimescaleDB y receptor de traps
+docker compose up -d                                   # postgres con TimescaleDB
 python zabbix/init_zabbix.py --timescaledb --avanzado  # idempotente: se puede repetir
+python zabbix/init_zabbix.py --backfill                # opcional: histórico de SONAR (ver abajo)
 ```
 
 `--timescaledb` crea la extensión y convierte `history*`/`trends*` en hypertables
@@ -94,9 +95,18 @@ ajusta las macros a nivel de host o grupo.
 Los Cisco IOS no admiten instalar el agente de Zabbix y sólo hablan SNMPv2c. El
 equivalente real de los "agentes activos" es:
 
-1. **Traps SNMP** (eventos al instante): el contenedor `zabbix-snmptraps` recibe los
-   traps en UDP 162 y el servidor los lee (`StartSNMPTrapper=1`, variable
-   `ZBX_ENABLE_SNMP_TRAPS`). La plantilla tiene los ítems
+1. **Traps SNMP** (eventos al instante): el servidor lee `zabbix/snmptraps/snmptraps.log`
+   (`StartSNMPTrapper=1`, variable `ZBX_ENABLE_SNMP_TRAPS`). Quién escribe ese archivo:
+   - **Windows (Docker Desktop)**: `python zabbix/trap_relay.py` en el propio Windows.
+     Docker Desktop reemplaza la IP de origen de lo que entra por un puerto publicado por
+     la de su gateway (172.x; comprobado), así que el contenedor no sabría de qué switch
+     viene cada trap. El receptor escucha UDP 162, ve la IP real, sólo acepta la comunidad
+     de SONAR y escribe en el formato de Zabbix. `--prueba` envía un linkDown de prueba.
+     Para que arranque con Windows, ver `entregas/zabbix-avanzado/switches-traps.txt` o:
+     `Register-ScheduledTask` con `python zabbix	rap_relay.py --sonar-root <SONAR>`.
+   - **Linux**: `docker compose --profile traps up -d` (el contenedor sí ve la IP real).
+
+   La plantilla tiene los ítems
    `snmptrap["linkDown|…"]` y `snmptrap["linkUp|…"]` y el disparador
    *SONAR: trap linkDown recibido* (5 min abierto por trap; se puede cerrar a mano).
    Zabbix asocia el trap al host por la IP de origen, que debe ser la misma de su interfaz SNMP.
@@ -109,7 +119,7 @@ equivalente real de los "agentes activos" es:
    En otra sede se copia sólo el servicio `zabbix-proxy` con `ZBX_PROXY_SERVER=<IP del
    servidor>` y `ZBX_PROXY_HOSTNAME` distinto, y se registra con `--proxy <nombre>`. Para
    que un plantel lo use: *Data collection → Hosts → (host) → Monitored by: Proxy*. Los
-   traps de ese plantel deben ir al equipo del proxy (con su propio `zabbix-snmptraps`).
+   traps de ese plantel deben ir al equipo del proxy (con su propio receptor de traps).
 3. **Ítems críticos rápidos con SNMP bulk**: ping (`icmpping[,3]`, pérdida y
    latencia) y, en cada uplink, estado operativo, bits in/out, errores y CRC cada
    `{$SONAR.FAST.INTERVAL}` (30 s; admite 10-30 s). La interfaz SNMP de los hosts tiene
@@ -137,8 +147,24 @@ Se enlaza a los hosts con la etiqueta `sonar=switch`, junto a *Cisco IOS by SNMP
 | Uplink se saturará en 7 días | ítem calculado con `forecast` sobre 30 días |
 
 Las funciones de tendencia se evalúan cada hora y necesitan datos: los primeros días
-quedan como *Unknown* ("not enough data") y los pronósticos sólo avisan con 6 días de
-historia o más. Es normal.
+quedan como *Unknown* ("not enough data"). Para no dar falsas anomalías con datos con
+huecos, STL y líneas base sólo se evalúan si `trendcount` cubre al menos
+`{$SONAR.TREND.MIN.RATIO}` (80 %) de las horas del periodo, y los pronósticos sólo avisan
+con 6 días de historia o más. Es normal.
+
+### Backfill desde SONAR (`--backfill`)
+
+Copia a Zabbix lo que SONAR ya guardó, para los mismos ítems de los disparadores:
+`sonar.cpu.util` (InfluxDB `cpu_1m`), `sonar.uplink.in/out` (InfluxDB, bps en ventanas de
+5 min) y `sonar.optical.rx` (muestras ópticas de SONAR). `history.push` de Zabbix 7 sólo
+acepta ítems trapper, así que se escribe con `COPY` en las tablas `history` y `trends`
+(una transacción) y después se reinicia `zabbix-server` para que su caché de valores lo
+vea. Sólo inserta valores **anteriores** al primero que ya tiene cada ítem: no pisa ni
+duplica nada y repetirlo no agrega filas. Saca un respaldo antes (ver abajo).
+
+El histórico de SONAR sólo existe mientras corrió el worker: si fueron unas horas al día,
+los pronósticos (timeleft/forecast) ya funcionan pero STL y líneas base esperan a que
+Zabbix junte su propia historia continua (la guarda de `trendcount`).
 
 ### Correlación de eventos
 
@@ -178,8 +204,10 @@ historia o más. Es normal.
 
 ### Lo que hay que configurar en cada switch (a mano, no lo hace el script)
 
-En modo configuración de cada Cisco, con la IP del equipo donde corre
-`zabbix-snmptraps` (o del proxy de la sede) y la misma comunidad v2c que ya usa SONAR:
+En modo configuración de cada Cisco, con la IP del equipo donde corre el receptor de traps
+(o el del proxy de la sede) y la misma comunidad v2c que ya usa SONAR. Los comandos ya
+completos por switch (IP de Soportet3 e interfaz de gestión real leída por SNMP) están en
+`entregas/zabbix-avanzado/switches-traps.txt`, fuera de Git porque llevan la comunidad.
 
 ```text
 snmp-server enable traps snmp linkdown linkup
@@ -190,8 +218,12 @@ snmp-server trap-source <interfaz de gestión, p. ej. Vlan1>
 `trap-source` hace que el trap salga con la IP que Zabbix tiene dada de alta. Verifica
 con `show snmp host`; luego, en Zabbix, *Monitoring → Latest data*, ítem "Trap SNMP
 linkDown" del host al desconectar un puerto de prueba. En Windows el puerto 162/udp puede
-estar ocupado por el servicio "Captura SNMP" (detenlo o cambia `ZBX_TRAPS_PORT`) y el
-firewall debe permitir 162/udp entrante desde la red de gestión.
+estar ocupado por el servicio "Captura SNMP" (SNMPTRAP; detenlo) y el firewall debe
+permitir 162/udp entrante desde la red de gestión:
+
+```powershell
+New-NetFirewallRule -DisplayName "SONAR traps SNMP (UDP 162)" -Direction Inbound -Protocol UDP -LocalPort 162 -RemoteAddress 192.168.27.0/24 -Action Allow -Profile Any
+```
 
 ## Respaldo y restauración
 
@@ -217,5 +249,5 @@ los conserva y `docker compose down -v` los **borra**.
 
 - 8090/tcp: interfaz web y API (`ZBX_URL`). Ábrelo sólo a la red del NOC.
 - 10051/tcp: servidor (agentes activos y proxies).
-- 162/udp: traps SNMP desde los switches (`zabbix-snmptraps`).
+- 162/udp: traps SNMP desde los switches (`trap_relay.py` en Windows, `zabbix-snmptraps` en Linux).
 - Salida hacia los switches: ICMP y SNMP 161/udp.

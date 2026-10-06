@@ -55,6 +55,7 @@ MACROS = {
     '{$SONAR.OPTICAL.RX.MIN}': ('-24', 'RX (dBm) donde el enlace deja de ser confiable (igual que SONAR).'),
     '{$SONAR.OPTICAL.RX.NAME}': ('(?i)(receive|rx)', 'Sensores DOM que son potencia de recepción.'),
     '{$SONAR.OPTICAL.TIMELEFT.WARN}': ('14d', 'Avisar si la RX llegará al mínimo antes de este plazo.'),
+    '{$SONAR.TREND.MIN.RATIO}': ('0.8', 'Fracción de horas con trends que exigen anomalías y líneas base (datos con huecos).'),
     '{$SONAR.TRAP.WINDOW}': ('5m', 'Tiempo que un trap linkDown mantiene el problema abierto.'),
     '{$SONAR.UPLINK.IFINDEX.MATCHES}': (NO_INDEX, 'ifIndex de los troncales; init_zabbix.py lo pone por host desde SONAR.'),
     '{$SONAR.UPLINK.IFNAME.MATCHES}': ('^(Te|Twe|Fo|Hu)', 'Nombres de interfaz que siempre son uplink.'),
@@ -114,6 +115,12 @@ PER_SECOND = ('CHANGE_PER_SECOND', '')
 def has_history(key):
     """Hay datos de hace 6 a 7 días: los pronósticos (timeleft/forecast) no extrapolan unas horas."""
     return f'count({key},1d:now-6d)>0'
+
+
+def enough_trends(key, hours):
+    """trendcount: al menos {$SONAR.TREND.MIN.RATIO} de las horas del periodo tienen trends (STL y línea base
+    con huecos dan falsas anomalías, p. ej. con el histórico parcial que se copia de InfluxDB)."""
+    return f'trendcount({key},{hours}h:now/h)>={{$SONAR.TREND.MIN.RATIO}}*{hours}'
 # cpmCPUTotal1minRev de todas las CPU (switch apilado = varias): se toma la mayor.
 CPU_JS = """var values = value.split('\\n').map(function (line) {
   var m = line.match(/=\\s*\\w+:\\s*(-?[0-9.]+)/); return m ? parseFloat(m[1]) : null;
@@ -147,13 +154,13 @@ def template_export():
                 opdata='Pérdida: {ITEM.LASTVALUE1}', depends=[unreachable], componente='red', correlacion='sintoma'),
         trigger('SONAR: latencia alta', f'avg({latency},2m)>{{$SONAR.LATENCY.WARN}}', 'WARNING',
                 opdata='Latencia: {ITEM.LASTVALUE1}', depends=[unreachable], componente='red', correlacion='sintoma'),
-        trigger('SONAR: CPU anómala (STL)', f'trendstl({cpu},168h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}}', 'WARNING',
+        trigger('SONAR: CPU anómala (STL)', f'trendstl({cpu},168h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}} and {enough_trends(cpu, 168)}', 'WARNING',
                 description='Descomposición STL de las tendencias horarias de 7 días (estacionalidad diaria): '
                             'más de {$SONAR.ANOMALY.RATE} de las últimas 3 h fuera de 3 MAD.',
                 componente='cpu', analisis='anomalia'),
         trigger('SONAR: CPU fuera de su línea base',
                 f'baselinedev({cpu},1h:now/h,"d",7)>{{$SONAR.BASELINE.DEVIATIONS}} and '
-                f'trendavg({cpu},1h:now/h)>{{$SONAR.CPU.BASELINE.MIN}}', 'WARNING',
+                f'trendavg({cpu},1h:now/h)>{{$SONAR.CPU.BASELINE.MIN}} and {enough_trends(cpu, 168)}', 'WARNING',
                 description='La última hora se separa más de {$SONAR.BASELINE.DEVIATIONS} desviaciones de la misma '
                             'hora de los 7 días anteriores.', componente='cpu', analisis='linea_base'),
         trigger('SONAR: CPU llegará a {$SONAR.CPU.MAX}% en menos de {$SONAR.FORECAST.HORIZON}',
@@ -204,7 +211,8 @@ def uplink_discovery(ping, loss, latency):
                         componente='enlace', interfaz='{#IFNAME}', correlacion='sintoma')
     crc_baseline = trigger('SONAR: CRC de {#IFNAME} sobre su línea base',
                            f'trendavg({crc},1h:now/h)>{{$SONAR.CRC.WARN}} and '
-                           f'trendavg({crc},1h:now/h)>3*baselinewma({crc},1h:now/h,"d",7)', 'WARNING',
+                           f'trendavg({crc},1h:now/h)>3*baselinewma({crc},1h:now/h,"d",7) and '
+                           f'{enough_trends(crc, 168)}', 'WARNING',
                            depends=[damaged], description='Última hora contra el promedio ponderado de la misma hora '
                                                           'de los 7 días anteriores.',
                            componente='enlace', interfaz='{#IFNAME}', correlacion='sintoma', analisis='linea_base')
@@ -215,14 +223,16 @@ def uplink_discovery(ping, loss, latency):
                                'tenido enlace no disparan; se cierra cuando la interfaz vuelve a up.',
                    componente='enlace', interfaz='{#IFNAME}', correlacion='causa')
     anomaly = trigger('SONAR: tráfico anómalo en {#IFNAME} (STL)',
-                      f'trendstl({rx_in},336h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}} or '
-                      f'trendstl({tx_out},336h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}}', 'WARNING',
+                      f'(trendstl({rx_in},336h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}} or '
+                      f'trendstl({tx_out},336h:now/h,3h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}}) and '
+                      f'{enough_trends(rx_in, 336)}', 'WARNING',
                       componente='enlace', interfaz='{#IFNAME}', analisis='anomalia')
     baseline = trigger('SONAR: tráfico de {#IFNAME} sobre su línea base',
-                       f'(trendavg({rx_in},1h:now/h)>{{$SONAR.BASELINE.FACTOR}}*baselinewma({rx_in},1h:now/h,"d",7) and '
+                       f'((trendavg({rx_in},1h:now/h)>{{$SONAR.BASELINE.FACTOR}}*baselinewma({rx_in},1h:now/h,"d",7) and '
                        f'trendavg({rx_in},1h:now/h)>{{$SONAR.BASELINE.MIN.BPS}}) or '
                        f'(trendavg({tx_out},1h:now/h)>{{$SONAR.BASELINE.FACTOR}}*baselinewma({tx_out},1h:now/h,"d",7) and '
-                       f'trendavg({tx_out},1h:now/h)>{{$SONAR.BASELINE.MIN.BPS}})', 'WARNING',
+                       f'trendavg({tx_out},1h:now/h)>{{$SONAR.BASELINE.MIN.BPS}})) and {enough_trends(rx_in, 168)}',
+                       'WARNING',
                        componente='enlace', interfaz='{#IFNAME}', analisis='linea_base')
     saturation = trigger('SONAR: {#IFNAME} se saturará en 7 días (forecast)',
                          f'last({k("sonar.uplink.forecast")})>{{$IF.UTIL.MAX}} and {has_history(rx_in)}', 'AVERAGE',
@@ -283,7 +293,8 @@ def optical_discovery():
                 opdata='Faltan {ITEM.LASTVALUE1}', depends=[low], componente='optica', interfaz=port,
                 analisis='pronostico'),
         trigger('SONAR: RX anómala en {#SENSOR_NAME} (STL)',
-                f'trendstl({rx},336h:now/h,6h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}}', 'WARNING',
+                f'trendstl({rx},336h:now/h,6h,1d,3,"mad")>{{$SONAR.ANOMALY.RATE}} and {enough_trends(rx, 336)}',
+                'WARNING',
                 depends=[low], componente='optica', interfaz=port, analisis='anomalia'),
     ]
     for data in triggers:

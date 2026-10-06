@@ -51,7 +51,8 @@ services:
     ports:
       - "${ZBX_SERVER_PORT:-10051}:10051"
     volumes:
-      - zbx_snmptraps:/var/lib/zabbix/snmptraps
+      # Carpeta del equipo: en Windows la llena trap_relay.py (ve la IP real del switch).
+      - ./snmptraps:/var/lib/zabbix/snmptraps
     networks: [zabbix]
 
   zabbix-web:
@@ -83,15 +84,17 @@ services:
       ZBX_SERVER_HOST: zabbix-server
     networks: [zabbix]
 
-  # Receptor de traps SNMP (linkDown/linkUp al instante). Los switches deben tener
-  # "snmp-server host <IP de este equipo> version 2c <comunidad>" (ver README).
+  # Receptor de traps SNMP en contenedor: sólo en Linux (docker compose --profile traps up -d).
+  # En Windows, Docker Desktop cambia la IP de origen de los traps por la de su gateway y
+  # Zabbix no sabría de qué switch vienen: ahí se usa zabbix/trap_relay.py (ver README).
   zabbix-snmptraps:
     image: zabbix/zabbix-snmptraps:alpine-7.0-latest
+    profiles: ["traps"]
     restart: unless-stopped
     ports:
       - "${ZBX_TRAPS_PORT:-162}:1162/udp"
     volumes:
-      - zbx_snmptraps:/var/lib/zabbix/snmptraps
+      - ./snmptraps:/var/lib/zabbix/snmptraps
     networks: [zabbix]
 
   # Proxy activo para una zona/sede: empuja al server lo que recolecta de sus switches.
@@ -118,7 +121,6 @@ services:
 
 volumes:
   zbx_postgres:
-  zbx_snmptraps:
   zbx_proxy:
 
 networks:

@@ -37,3 +37,6 @@ scripts/local/
 node_modules/
 frontend/dist/
 .env.local
+
+# Traps SNMP recibidos (zabbix/trap_relay.py o el contenedor zabbix-snmptraps)
+zabbix/snmptraps/

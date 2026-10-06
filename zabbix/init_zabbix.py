@@ -6,6 +6,7 @@
     python zabbix/init_zabbix.py --timescaledb      activa TimescaleDB (hypertables y compresión)
     python zabbix/init_zabbix.py --avanzado         plantilla SONAR, correlación, Geomap, SLA e histórico
     python zabbix/init_zabbix.py --proxy [NOMBRE]   registra un proxy activo para una zona
+    python zabbix/init_zabbix.py --backfill         copia el histórico de InfluxDB/SONAR a Zabbix
 
 Lee zabbix/.env (ZBX_URL, ZBX_ADMIN_PASSWORD, ZBX_SNMP_COMMUNITY) y el .env de SONAR
 (INVENTORY_SOURCE, SNMP_*). Sólo usa la biblioteca estándar y PyYAML; con
@@ -24,6 +25,7 @@ from urllib.request import Request, urlopen
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import avanzado  # noqa: E402
+import backfill  # noqa: E402
 DEFAULT_PASSWORD = 'zabbix'
 TEMPLATES = ('Cisco IOS by SNMP', 'Network Generic Device by SNMP')
 COMMUNITY_MACRO = '{$SNMP_COMMUNITY}'
@@ -254,6 +256,27 @@ def compose(*args, stdin=None):
     return subprocess.run(['docker', 'compose', *args], cwd=HERE, input=stdin, capture_output=True, check=False)
 
 
+def psql_runner(zabbix_env):
+    """psql(*args, stdin=None) -> stdout dentro del contenedor postgres; ZabbixError si falla."""
+    user, db = zabbix_env.get('ZBX_POSTGRES_USER', 'zabbix'), zabbix_env.get('ZBX_POSTGRES_DB', 'zabbix')
+
+    def psql(*args, stdin=None):
+        result = compose('exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-q', '-U', user, '-d', db, *args,
+                         stdin=stdin.encode() if isinstance(stdin, str) else stdin)
+        if result.returncode:
+            raise ZabbixError(f'psql: {result.stderr.decode(errors="replace").strip()}')
+        return result.stdout.decode(errors='replace')
+    return psql
+
+
+def run_backfill(api, sonar_root, sonar_env, zabbix_env):
+    django_switches(sonar_root)  # prepara Django (puertos y óptica de SONAR)
+    hosts = avanzado.sonar_hosts(api)
+    return backfill.run(api, hosts, sonar_env, psql_runner(zabbix_env),
+                        restart=lambda: (print('· Reiniciando zabbix-server para recargar su caché de valores...'),
+                                         compose('restart', 'zabbix-server')))
+
+
 def enable_timescaledb(zabbix_env):
     """Extensión TimescaleDB e hypertables de Zabbix (timescaledb.sql es idempotente)."""
     user, db = zabbix_env.get('ZBX_POSTGRES_USER', 'zabbix'), zabbix_env.get('ZBX_POSTGRES_DB', 'zabbix')
@@ -298,6 +321,8 @@ def main(argv=None):
                         help='plantilla SONAR (traps, uplinks 30 s, tendencias), correlación, Geomap, SLA e histórico')
     parser.add_argument('--timescaledb', action='store_true',
                         help='activa TimescaleDB en la base (docker compose exec; detiene el server un momento)')
+    parser.add_argument('--backfill', action='store_true',
+                        help='copia a Zabbix el histórico de InfluxDB y la óptica de SONAR (sólo lo anterior a sus datos)')
     parser.add_argument('--proxy', metavar='NOMBRE', nargs='?', const='',
                         help='registra un proxy activo (por omisión ZBX_PROXY_HOSTNAME o "SONAR-proxy-zona1")')
     parser.add_argument('--sonar-root', default=str(HERE.parent), help='carpeta de SONAR (.env, inventario, base)')
@@ -323,6 +348,8 @@ def main(argv=None):
             trunks, ubicaciones = sonar_extras(sonar_root)
             history_days = int(zabbix_env.get('ZBX_HISTORY_DAYS') or 90)
             avanzado.apply(api, sonar_root, trunks, ubicaciones, history_days=max(30, min(history_days, 90)))
+        if args.backfill:
+            run_backfill(api, sonar_root, sonar_env, zabbix_env)
         if args.proxy is not None:
             avanzado.apply_proxy(api, args.proxy or zabbix_env.get('ZBX_PROXY_HOSTNAME') or 'SONAR-proxy-zona1')
         if args.token:

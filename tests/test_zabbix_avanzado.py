@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'zabbix'))
 
 import avanzado  # noqa: E402
+import backfill  # noqa: E402
+import trap_relay  # noqa: E402
 
 
 def walk(node):
@@ -127,6 +129,76 @@ class HelperTests(unittest.TestCase):
             body = api.calls[-1][1]
             self.assertEqual((body['hk_history'], body['hk_trends']), ('90d', '365d'))
             self.assertEqual('compression_status' in body, compressed)
+
+
+class TrendGuardTests(unittest.TestCase):
+    def test_anomalies_and_baselines_require_trend_coverage(self):
+        export = avanzado.template_export()['zabbix_export']
+        for node in walk(export):
+            expression = node.get('expression', '')
+            if 'uuid' in node and ('trendstl(' in expression or 'baseline' in expression):
+                self.assertIn('trendcount(', expression, node['name'])
+
+
+def v2c_trap(community, trap_oid, extra=()):
+    from pysnmp.proto import api
+    from pyasn1.codec.ber import encoder
+    module = api.PROTOCOL_MODULES[api.SNMP_VERSION_2C]
+    pdu = module.SNMPv2TrapPDU()
+    module.apiTrapPDU.set_defaults(pdu)
+    module.apiTrapPDU.set_varbinds(pdu, [(module.ObjectIdentifier('1.3.6.1.2.1.1.3.0'), module.TimeTicks(5)),
+                                         (module.ObjectIdentifier(trap_oid[0]), module.ObjectIdentifier(trap_oid[1])),
+                                         *extra])
+    message = module.Message()
+    module.apiMessage.set_defaults(message)
+    module.apiMessage.set_community(message, community)
+    module.apiMessage.set_pdu(message, pdu)
+    return encoder.encode(message)
+
+
+class TrapRelayTests(unittest.TestCase):
+    def test_decodes_link_down_and_writes_zabbix_format(self):
+        from pysnmp.proto import api
+        module = api.PROTOCOL_MODULES[api.SNMP_VERSION_2C]
+        data = v2c_trap('secreta', (trap_relay.SNMP_TRAP_OID, '1.3.6.1.6.3.1.1.5.3'),
+                        [(module.ObjectIdentifier('1.3.6.1.2.1.2.2.1.1.10101'), module.Integer(10101))])
+        lines = trap_relay.decode(data, {'secreta'})
+        self.assertIn('SNMPv2-MIB::snmpTrapOID.0 = 1.3.6.1.6.3.1.1.5.3 (linkDown)', lines)
+        self.assertIn('1.3.6.1.2.1.2.2.1.1.10101 = 10101', lines)
+        text = trap_relay.record('192.168.27.3', 50000, lines)
+        self.assertRegex(text.splitlines()[0], r'^\S+ ZBXTRAP 192\.168\.27\.3$')
+        # La clave del ítem de la plantilla encuentra el trap.
+        regex = avanzado.TRAP_DOWN[len('snmptrap["'):-2]
+        self.assertRegex(text, regex)
+
+    def test_rejects_other_communities_and_garbage(self):
+        data = v2c_trap('otra', (trap_relay.SNMP_TRAP_OID, '1.3.6.1.6.3.1.1.5.3'))
+        self.assertIsNone(trap_relay.decode(data, {'secreta'}))
+        self.assertIsNotNone(trap_relay.decode(data, set()))
+        self.assertIsNone(trap_relay.decode(b'no es snmp', set()))
+
+
+class BackfillTests(unittest.TestCase):
+    def test_only_rows_before_existing_data(self):
+        points = [(3600 * 10 + 60, 1.0), (3600 * 10 + 360, 3.0), (3600 * 11 + 60, 5.0), (3600 * 12 + 60, 7.0)]
+        history, trends = backfill.rows_before(points, first_history=3600 * 12, first_trend=None)
+        self.assertEqual(history, points[:3])
+        self.assertEqual(trends, [(36000, 2, 1.0, 2.0, 3.0), (39600, 1, 5.0, 5.0, 5.0)])
+        # Zabbix ya tiene trends desde la hora 11: esa hora no se toca.
+        _history, trends = backfill.rows_before(points, first_history=3600 * 12, first_trend=3600 * 11)
+        self.assertEqual([row[0] for row in trends], [36000])
+        self.assertEqual(backfill.rows_before(points, first_history=0, first_trend=None), ([], []))
+
+    def test_copy_script_is_one_transaction(self):
+        script = backfill.copy_sql({'42': ([(100, 1.5)], [(0, 1, 1.5, 1.5, 1.5)])})
+        self.assertTrue(script.startswith('BEGIN;\nCOPY history'))
+        self.assertIn('42\t100\t1.5\t0\n\\.\n', script)
+        self.assertIn('42\t0\t1\t1.5\t1.5\t1.5', script)
+        self.assertTrue(script.endswith('COMMIT;\n'))
+
+    def test_short_port_matches_backend(self):
+        self.assertEqual(backfill.short_port('GigabitEthernet1/0/25'), backfill.short_port('Gi1/0/25'))
+        self.assertEqual(backfill.short_port('TenGigabitEthernet1/1/1'), 'te1/1/1')
 
 
 if __name__ == '__main__':
