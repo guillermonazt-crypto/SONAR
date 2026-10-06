@@ -10,6 +10,10 @@ uno con una falla grave:
     condición crítica (hardware, óptica, CPU…)      5.0 por equipo
 
 Verde < 5, amarillo de 5 a 15 y rojo > 15.
+
+Con Zabbix configurado, sus problemas activos (no suprimidos) del switch también
+cuentan, sin duplicar lo que SONAR ya detectó en el mismo equipo: severidad
+Desastre suma como crítico, Alta como caído y Advertencia/Media como lento.
 """
 
 WEIGHTS = dict(puerto=0.5, lento=1.0, caido=3.0, critico=5.0)
@@ -18,6 +22,8 @@ CRITICAL_SCORE = 15
 DOWN_TYPES = ('snmp', 'lectura')
 SLOW_TYPES = ('latencia', 'cpu', 'memoria')
 PORT_KEYS = ('con_errores', 'inestables', 'poe_falla')
+# Severidades de Zabbix: 2 Advertencia, 3 Media, 4 Alta, 5 Desastre.
+ZABBIX_SLOW, ZABBIX_DOWN, ZABBIX_CRITICAL = 2, 4, 5
 
 
 def device_events(device):
@@ -29,10 +35,18 @@ def device_events(device):
     alive_without_snmp = any(r.get('level') == 'warning' and r.get('tipo') == 'snmp' for r in reasons)
     slow = alive_without_snmp or any(r.get('level') == 'warning' and r.get('tipo') in SLOW_TYPES for r in reasons)
     ports = device.get('puertos') or {}
+    severe = any(r.get('tipo') not in DOWN_TYPES for r in critical)
+    zabbix = (device.get('zabbix') or {}).get('severidad') or 0
+    if zabbix >= ZABBIX_CRITICAL:
+        severe = True
+    elif zabbix >= ZABBIX_DOWN and not severe:
+        down = True
+    elif zabbix >= ZABBIX_SLOW and not (severe or down):
+        slow = True
     return dict(puerto=sum(ports.get(key) or 0 for key in PORT_KEYS),
                 lento=int(slow and not down),
                 caido=int(down),
-                critico=int(any(r.get('tipo') not in DOWN_TYPES for r in critical)))
+                critico=int(severe))
 
 
 def score(events):

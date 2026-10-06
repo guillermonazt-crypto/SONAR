@@ -54,10 +54,13 @@ La API no borra inventario: utiliza activo=false para conservar historial y puer
 | /api/switches/ | GET, POST | Inventario |
 | /api/{recurso}/{id}/ | GET, PUT, PATCH | Consultar/editar |
 | /api/switches/{id}/puertos/ | GET | Últimas observaciones (sólo puertos físicos) |
-| /api/switches/{id}/historial/ | GET | CPU, memoria y tráfico de 24 h |
-| /api/puertos/{id}/historial/ | GET | Octetos del puerto de 24 h |
+| /api/switches/{id}/historial/ | GET | CPU, memoria y tráfico de 24 h (`fuente`: influx o zabbix) |
+| /api/puertos/{id}/historial/ | GET | Tráfico del puerto de 24 h (`unidad`: octetos de InfluxDB o bps de Zabbix) |
 | /api/resumen/ | GET | Estado, motivos, puertos e histórico de todos los switches (caché 60 s; `?refresh=1` la renueva) |
 | /api/integrations/zabbix/ | GET | Hosts publicados por Zabbix |
+| /api/vivo/ | GET | Problemas activos, disponibilidad y últimos valores de Zabbix (`?plantel=`; caché 15 s) |
+| /api/vivo/switches/{id}/ | GET | Últimos valores de Zabbix del switch con sus uplinks |
+| /api/vivo/problemas/{eventid}/reconocer/ | POST JSON | `{mensaje, reconocer}`; editor o administrador |
 
 Los endpoints de listado retornan arreglos JSON; con `?page=N` (y `page_size`)
 devuelven una página `{count, next, previous, results}`.

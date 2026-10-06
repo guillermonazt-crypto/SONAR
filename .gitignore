@@ -16,6 +16,7 @@ data/
 
 # Docker
 docker-compose.yml
+!zabbix/docker-compose.yml
 
 # Logs
 *.log

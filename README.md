@@ -27,6 +27,7 @@ docs/                Arquitectura y contrato de API
 inventory/            Inventario YAML opcional y privado
 data/                Datos locales
 grafana/             Configuración histórica opcional
+zabbix/              Stack Zabbix 7.0 (Docker) y alta de switches
 ```
 
 ## Iniciar en desarrollo
@@ -214,18 +215,26 @@ credenciales anteriores: cámbialas en la interfaz de InfluxDB.
 token de sólo lectura para Django (`INFLUX_READ_TOKEN`). `--raw-retention-days 14`
 reduce la retención del bucket crudo y **borra** los datos más antiguos.
 
-## Integración opcional con Zabbix
+## Integración opcional con Zabbix (tiempo real)
 
-SONAR puede consultar los hosts publicados por Zabbix desde **Resumen**. Configura
-estas variables en `.env` y reinicia Django:
+Zabbix aporta el análisis en tiempo real (problemas, disponibilidad y últimos
+valores) para que SONAR no dependa sólo de InfluxDB. El stack listo para Docker
+y su script de alta están en [`zabbix/`](zabbix/README.md). Con estas variables
+en `.env` (y Django reiniciado) aparecen el panel **En vivo (Zabbix)** en Inicio y
+Alertas, los últimos valores en el detalle del switch y `/api/vivo/`:
 
 ```env
-ZABBIX_URL=http://servidor-zabbix/zabbix
+ZABBIX_URL=http://localhost:8090
 ZABBIX_TOKEN=
+# auto: InfluxDB y, si no responde o no tiene datos, Zabbix · influx · zabbix
+HISTORY_SOURCE=auto
 ```
 
-La integración es de sólo lectura. Zabbix puede encargarse de métricas, históricos
-y alertas SNMP, mientras SONAR conserva la vista física y el inventario por plantel.
+Sin `ZABBIX_URL`/`ZABBIX_TOKEN` SONAR funciona igual que antes. Los problemas
+activos de Zabbix también suman al semáforo ponderado del plantel (Desastre como
+crítico, Alta como caído, Advertencia/Media como lento) sin duplicar lo que SONAR
+ya detectó en el mismo equipo. Reconocer o comentar un problema desde SONAR
+requiere rol editor o administrador y queda en la bitácora.
 
 ## Pruebas sin switches reales
 

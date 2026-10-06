@@ -348,6 +348,12 @@ def summarize_sites(planteles, devices, open_alerts=None, maintenance=None):
         # 'estado' sigue siendo el peor equipo, para avisos y listas.
         weighted = site_score(members[site['id']])
         site.update(puntaje=weighted['puntaje'], estado_ponderado=weighted['estado'], desglose=weighted['desglose'])
+        # Problemas activos de Zabbix de los equipos del plantel (sólo con la integración activa).
+        if any('zabbix' in d for d in members[site['id']]):
+            live = [d['zabbix'] for d in members[site['id']] if d.get('zabbix')]
+            site['zabbix'] = dict(problemas=sum(z['problemas'] for z in live),
+                                  sin_reconocer=sum(z['sin_reconocer'] for z in live),
+                                  severidad=max((z['severidad'] for z in live if z['severidad'] is not None), default=None))
         latencies = [d['latencia_ms'] for d in members[site['id']] if d.get('latencia_ms') is not None]
         losses = [d['perdida_pct'] for d in members[site['id']] if d.get('perdida_pct') is not None]
         if latencies:

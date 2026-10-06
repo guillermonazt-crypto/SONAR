@@ -25,6 +25,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 load_dotenv(BASE_DIR.parent / '.env')
+if sys.argv[1:2] == ['test']:
+    # Las pruebas nunca consultan el Zabbix real del .env: simulan urlopen.
+    os.environ['ZABBIX_URL'] = os.environ['ZABBIX_TOKEN'] = ''
 SECRET_KEY = os.getenv('SECRET_KEY', '')
 if not SECRET_KEY.strip():
     raise ImproperlyConfigured('Configura SECRET_KEY en el entorno o en .env')

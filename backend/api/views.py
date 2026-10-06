@@ -1,3 +1,6 @@
+import json
+import os
+
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.core.cache import cache
@@ -28,7 +31,8 @@ from .permissions import EditorOnlyPermission, InventoryPermission, can_edit
 from .serializers import (AlertaSerializer, BitacoraSerializer, DescubiertoSerializer, DivisionSerializer,
                           MantenimientoSerializer, PlantelSerializer, PuertoSerializer, RespaldoSerializer,
                           SwitchSerializer)
-from .zabbix import status as zabbix_status
+from . import zabbix as zabbix_api
+from .zabbix import ZabbixError, status as zabbix_status
 
 LOGIN_MAX_FAILURES = 5
 LOGIN_LOCK_SECONDS = 15 * 60
@@ -103,30 +107,135 @@ def zabbix(request):
     return JsonResponse(zabbix_status())
 
 
+def history_source():
+    """HISTORY_SOURCE=auto|influx|zabbix (auto: InfluxDB y, si falla o no tiene datos, Zabbix)."""
+    value = os.getenv('HISTORY_SOURCE', 'auto').strip().lower()
+    return value if value in ('auto', 'influx', 'zabbix') else 'auto'
+
+
+def history_response(from_influx, from_zabbix):
+    """{points, fuente, detail?}: la fuente es 'influx', 'zabbix' o None si ninguna respondió."""
+    mode = history_source()
+    errors, points = [], []
+    if mode != 'zabbix':
+        try:
+            points = from_influx()
+            if points or mode == 'influx' or not zabbix_api.configured():
+                return {'points': points, 'fuente': 'influx'}
+        except Exception as error:
+            errors.append(f'InfluxDB: {error}')
+            if mode == 'influx' or not zabbix_api.configured():
+                return {'points': [], 'fuente': None, 'detail': f'Histórico no disponible: {error}'}
+    try:
+        zabbix_points = from_zabbix()
+    except ZabbixError as error:
+        if mode != 'zabbix' and not errors:
+            # InfluxDB respondió sin datos y Zabbix tampoco tiene: se queda la respuesta de InfluxDB.
+            return {'points': points, 'fuente': 'influx'}
+        return {'points': [], 'fuente': None, 'detail': 'Histórico no disponible: ' + ' · '.join(errors + [str(error)])}
+    if not zabbix_points and mode != 'zabbix' and not errors:
+        return {'points': points, 'fuente': 'influx'}
+    return {'points': zabbix_points, 'fuente': 'zabbix', **({'detail': errors[0]} if errors else {})}
+
+
 @require_GET
 @requires_session
 def port_history(request, pk=None):
-    """Devuelve la serie histórica de tráfico de un puerto desde InfluxDB."""
-    port = Puerto.objects.select_related('switch').filter(pk=pk).first()
+    """Serie de tráfico de un puerto (InfluxDB: contadores; Zabbix: bits por segundo)."""
+    port = Puerto.objects.select_related('switch__plantel').filter(pk=pk).first()
     if port is None:
         return JsonResponse({'points': []}, status=404)
-    try:
-        return JsonResponse({'points': history.port_history(port.switch.nombre, port.nombre)})
-    except Exception as error:
-        return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
+    data = history_response(lambda: history.port_history(port.switch.nombre, port.nombre),
+                            lambda: zabbix_api.port_history(port.switch, port.nombre))
+    data['unidad'] = 'bps' if data['fuente'] == 'zabbix' else 'octetos'
+    return JsonResponse(data)
 
 
 @require_GET
 @requires_session
 def switch_history(request, pk=None):
     """Serie de CPU, memoria y tráfico de un switch para las gráficas nativas."""
-    switch = Switch.objects.filter(pk=pk).first()
+    switch = Switch.objects.select_related('plantel').filter(pk=pk).first()
     if switch is None:
         return JsonResponse({'points': []}, status=404)
+    return JsonResponse(history_response(lambda: history.switch_histories([switch.nombre]).get(switch.nombre, []),
+                                         lambda: zabbix_api.switch_history(switch)))
+
+
+def live_switches(plantel=None):
+    switches = Switch.objects.select_related('plantel').filter(activo=True)
+    return switches.filter(plantel_id=plantel) if plantel is not None else switches
+
+
+def live_payload(request, extra):
+    return dict(dict(configurado=True, fuente='zabbix', generado=timezone.now().isoformat(),
+                     puede_reconocer=can_edit(request.user), detalle=None), **extra)
+
+
+NOT_CONFIGURED = 'Zabbix no está configurado (ZABBIX_URL y ZABBIX_TOKEN).'
+
+
+@require_GET
+@requires_session
+def live(request):
+    """GET /api/vivo/ (?plantel=): problemas activos, disponibilidad y últimos valores de Zabbix."""
+    empty = dict(problemas=[], switches=[], resumen=None)
+    if not zabbix_api.configured():
+        return JsonResponse(dict(empty, configurado=False, fuente=None, puede_reconocer=False, detalle=NOT_CONFIGURED))
     try:
-        return JsonResponse({'points': history.switch_histories([switch.nombre]).get(switch.nombre, [])})
-    except Exception as error:
-        return JsonResponse({'points': [], 'detail': f'Histórico no disponible: {error}'})
+        data = zabbix_api.live(live_switches(site_id(request.GET)))
+    except ZabbixError as error:
+        return JsonResponse(live_payload(request, dict(empty, detalle=str(error))))
+    return JsonResponse(live_payload(request, data))
+
+
+@require_GET
+@requires_session
+def live_switch(request, pk):
+    """GET /api/vivo/switches/<id>/: últimos valores de Zabbix del switch, con sus uplinks."""
+    switch = Switch.objects.select_related('plantel').filter(pk=pk).first()
+    if switch is None:
+        return JsonResponse({'detail': 'El switch no existe.'}, status=404)
+    if not zabbix_api.configured():
+        return JsonResponse(dict(configurado=False, fuente=None, switch=None, problemas=[], puede_reconocer=False,
+                                 detalle=NOT_CONFIGURED))
+    try:
+        data = zabbix_api.live([switch], interfaces=True)
+    except ZabbixError as error:
+        return JsonResponse(live_payload(request, dict(switch=None, problemas=[], detalle=str(error))))
+    return JsonResponse(live_payload(request, dict(switch=data['switches'][0], problemas=data['problemas'])))
+
+
+@require_POST
+@csrf_protect
+@requires_session
+def live_acknowledge(request, eventid):
+    """POST /api/vivo/problemas/<eventid>/reconocer/ {mensaje, reconocer}: sólo editores y administradores."""
+    if not can_edit(request.user):
+        return JsonResponse({'detail': 'Sólo editores y administradores pueden reconocer problemas.'}, status=403)
+    if not zabbix_api.configured():
+        return JsonResponse({'detail': NOT_CONFIGURED}, status=503)
+    try:
+        body = json.loads(request.body or b'{}')
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    message = str(body.get('mensaje', '')).strip()
+    ack = body.get('reconocer', True) is not False
+    try:
+        # Sólo problemas de switches de SONAR: el token no sirve para tocar otros eventos.
+        problem = next((p for p in zabbix_api.live(live_switches())['problemas'] if p['eventid'] == str(eventid)), None)
+        if problem is None:
+            return JsonResponse({'detail': 'El problema no existe o ya se resolvió.'}, status=404)
+        if message or (ack and not problem['reconocido']):
+            zabbix_api.acknowledge(eventid, message, ack=ack and not problem['reconocido'])
+    except ZabbixError as error:
+        return JsonResponse({'detail': str(error)}, status=502)
+    registrar(request, 'reconocer', 'zabbix',
+              f"{'Reconoció' if ack else 'Comentó'} en Zabbix: {problem['nombre']} ({problem['switch']['nombre']})",
+              int(eventid), dict(mensaje=message))
+    return JsonResponse(dict(problem, reconocido=problem['reconocido'] or ack))
 
 
 @require_GET
@@ -186,6 +295,14 @@ def build_summary(now=None, plantel=None):
                           alerta=alert and dict(id=alert.pk, desde=alert.inicio.isoformat(),
                                                 reconocida=alert.reconocida_en is not None),
                           historial=histories.get(switch.nombre, [])))
+    zabbix_detail = None
+    if zabbix_api.configured():
+        try:
+            problems = zabbix_api.problems_by_switch([s for s in switches if s.activo])
+        except ZabbixError as error:
+            problems, zabbix_detail = {}, str(error)
+        for item in items:
+            item['zabbix'] = problems.get(item['id'], dict(problemas=0, sin_reconocer=0, severidad=None))
     last = Switch.objects.filter(activo=True, pk__in=[s.pk for s in switches]).aggregate(last=Max('ultima_consulta'))['last']
     return dict(
         generado=now.isoformat(),
@@ -195,6 +312,7 @@ def build_summary(now=None, plantel=None):
         monitoreo=monitoring_status(worker, now),
         umbrales=thresholds,
         historial_detalle=detail,
+        zabbix=dict(configurado=zabbix_api.configured(), detalle=zabbix_detail),
         planteles=site_summary(switches, items, alerts.values(), now, plantel),
         switches=items,
     )
